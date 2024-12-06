@@ -26,20 +26,20 @@ Calculate the fire weather index using downscaled CMIP6 data
 '''
 
 ## Precipitation; and change its units to mm/day
-path = '/glade/derecho/scratch/xiaojuan/NEX_GDDP_CMIP6/MPI-ESM1-2-HR/historical/r1i1p1f1/'
-ds_prec = xr.open_dataset(path+'pr/pr_day_MPI-ESM1-2-HR_historical_r1i1p1f1_gn_2014_v1.1.nc') ## prec is 
+path = '/data_test'
+ds_prec = xr.open_dataset('/Users/ericcollins/climate-risk-map-hazards/Wildfire/FWI/data_test/pr_day_CESM2_ssp126_r4i1p1f1_gn_2030_v1.1.nc') ## prec is 
 prec = ds_prec.pr
 
 ## daily maximum temperature; and change its units to degC. 
-ds_tas = xr.open_dataset(path+'tasmax/tasmax_day_MPI-ESM1-2-HR_historical_r1i1p1f1_gn_2014.nc') ## prec is 
-tas = ds_tas.tasmax
+ds_tas = xr.open_dataset('/Users/ericcollins/climate-risk-map-hazards/Wildfire/FWI/data_test/tas_day_CESM2_ssp126_r4i1p1f1_gn_2030.nc') ## prec is 
+tas = ds_tas.tas
 
 ## Relative humidity
-ds_RH = xr.open_dataset(path+'hurs/hurs_day_MPI-ESM1-2-HR_historical_r1i1p1f1_gn_2014_v1.1.nc') ## prec is 
+ds_RH = xr.open_dataset('/Users/ericcollins/climate-risk-map-hazards/Wildfire/FWI/data_test/hurs_day_CESM2_ssp126_r4i1p1f1_gn_2030_v1.1.nc') ## prec is 
 rh = ds_RH.hurs
 
 ## Wind speed
-ds_ws = xr.open_dataset(path+'sfcWind/sfcWind_day_MPI-ESM1-2-HR_historical_r1i1p1f1_gn_2014.nc') ## prec is 
+ds_ws = xr.open_dataset('/Users/ericcollins/climate-risk-map-hazards/Wildfire/FWI/data_test/sfcWind_day_CESM2_ssp126_r4i1p1f1_gn_2030.nc') ## prec is 
 ws = ds_ws.sfcWind
 
 
