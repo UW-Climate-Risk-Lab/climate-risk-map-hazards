@@ -3,3 +3,4 @@ xarray
 dask
 zarr
 h5netcdf
+distributed
