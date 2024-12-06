@@ -1,0 +1,5 @@
+xclim
+xarray
+dask
+zarr
+h5netcdf
