@@ -149,9 +149,9 @@ def calc(ds: xr.Dataset, config: RunConfig, tempdir: str) -> xr.Dataset:
         }
         ds = ds.chunk(target_chunks)
         try:
-            tas = ds.tas
-        except:
             tas = ds.tasmax
+        except:
+            tas = ds.tas
         
         out_fwi = xclim.indicators.atmos.cffwis_indices(
             tas=tas,
