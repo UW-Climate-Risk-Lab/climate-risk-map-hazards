@@ -23,5 +23,8 @@ EXPOSE 8787
 # Set environment variables
 ENV PYTHONUNBUFFERED=1
 
-# Command to run the application
+# Set the entrypoint to run the Python script
 ENTRYPOINT ["python", "dask_ec2_test.py"]
+
+# Provide a default argument that can be overridden
+CMD ["--ec2_type", "t2.micro"]
