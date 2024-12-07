@@ -126,14 +126,9 @@ def load_data(config: RunConfig, temp_dir: str) -> xr.Dataset:
     """
     if config.s3:
         
-        try:
-            # Step 1: Download files from S3 to the temporary directory
-            local_files = download_s3_files_to_temp(config.input_uris, temp_dir)
-
-            # Step 2: Load data using xarray
-            ds = xr.open_mfdataset(local_files, engine="h5netcdf")
-        finally:
-            return ds
+        local_files = download_s3_files_to_temp(config.input_uris, temp_dir)
+        ds = xr.open_mfdataset(local_files, engine="h5netcdf")
+        return ds
     else:
         # Directly load data if not using S3
         ds = xr.open_mfdataset(config.input_uris, engine="h5netcdf")
@@ -160,7 +155,7 @@ def rechunk(ds: xr.Dataset, config: RunConfig):
         client.close()
 
 
-def calc(config: RunConfig, tempdir: str) -> xr.Dataset:
+def calc(ds: xr.Dataset, config: RunConfig, tempdir: str) -> xr.Dataset:
     client = Client(
         n_workers=config.calc_n_workers,
         threads_per_worker=config.threads_per_worker,
@@ -168,9 +163,13 @@ def calc(config: RunConfig, tempdir: str) -> xr.Dataset:
     )
     try:
         if RECHUNK:
-            ds = xr.open_zarr(config.zarr_store)
-        else:
-            ds = load_data(config, tempdir)
+            target_chunks = {
+            "time": config.time_chunk,
+            "lat": config.lat_chunk,
+            "lon": config.lon_chunk,
+            }
+            ds = ds.chunk(target_chunks)
+            #ds = xr.open_zarr(config.zarr_store)
         out_fwi = xclim.indicators.atmos.cffwis_indices(
             tas=ds.tas,
             pr=ds.pr,
@@ -243,11 +242,11 @@ def main(ec2_type: str):
 
     config_start_time = time.time()
     temp_dir = tempfile.mkdtemp()
+    start_time = time.time()
     ds = load_data(config, temp_dir)
     load_elapsed_time = time.time() - start_time
 
     if RECHUNK:
-        # First, rechunk data and store on disk as zarr
         start_time = time.time()
         try:
             rechunk(ds, config)
@@ -264,12 +263,17 @@ def main(ec2_type: str):
     # Then, process the rechunked data
     start_time = time.time()
     try:
-        ds = calc(config, temp_dir)
+        ds = calc(ds, config, temp_dir)
         calc_elapsed_time = time.time() - start_time
     except Exception as e:
         ds = None
         calc_elapsed_time = -999
         print(f"Configuration {config.run_id} calc failed: {e}")
+    # The temp_dir is only cleaned up in the RECHUNK block, but should be cleaned up at the end
+    # Add at the end of main():
+    finally:
+        if os.path.exists(temp_dir):
+            shutil.rmtree(temp_dir)
 
     
     try:
