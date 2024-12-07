@@ -6,6 +6,7 @@ import time
 import os
 import shutil
 import s3fs
+import fsspec
 import boto3
 import multiprocessing
 
@@ -22,10 +23,10 @@ WRITE = True
 TEST_S3_PATHS = {
     "one_year": {
         "s3": [
-            "s3://uw-climaterisklab/scratch/climate_calc_test/one_year/hurs_day_CESM2_ssp126_r4i1p1f1_gn_2030_v1.1.nc",
-            "s3://uw-climaterisklab/scratch/climate_calc_test/one_year/pr_day_CESM2_ssp126_r4i1p1f1f1_gn_2030_v1.1.nc",
-            "s3://uw-climaterisklab/scratch/climate_calc_test/one_year/sfcWind_day_CESM2_ssp126_r4i1p1f1_gn_2030.nc",
-            "s3://uw-climaterisklab/scratch/climate_calc_test/one_year/tas_day_CESM2_ssp126_r4i1p1f1_gn_2030.nc",
+            "s3://nex-gddp-cmip6/NEX-GDDP-CMIP6/CESM2/ssp126/r4i1p1f1/hurs/hurs_day_CESM2_ssp126_r4i1p1f1_gn_2030_v1.1.nc",
+            "s3://nex-gddp-cmip6/NEX-GDDP-CMIP6/CESM2/ssp126/r4i1p1f1/pr/pr_day_CESM2_ssp126_r4i1p1f1_gn_2030_v1.1.nc",
+            "s3://nex-gddp-cmip6/NEX-GDDP-CMIP6/CESM2/ssp126/r4i1p1f1/sfcWind/sfcWind_day_CESM2_ssp126_r4i1p1f1_gn_2030.nc",
+            "s3://nex-gddp-cmip6/NEX-GDDP-CMIP6/CESM2/ssp126/r4i1p1f1/tas/tas_day_CESM2_ssp126_r4i1p1f1_gn_2030.nc",
         ],
         "local": [],
     },
@@ -45,7 +46,7 @@ TIME_CHUNK = -1
 LAT_CHUNK = 30
 LON_CHUNK = 72
 CALC_N_WORKERS = 96
-THREADS = 8
+THREADS = 1
 
 
 @dataclass
@@ -191,10 +192,12 @@ def main(ec2_type: str):
     # Load data directly from S3 using fsspec and xarray
     # Disable unnecessary decoding to speed up
     start_time = time.time()
+    fs = fsspec.filesystem('s3', anon=True)
+    flist = [fs.open(path, mode="rb") for path in config.input_uris]
     ds = xr.open_mfdataset(
-        config.input_uris,
+        flist,
         engine="h5netcdf",
-        decode_times=False,
+        decode_times=True,
         combine='by_coords',
         chunks={}
     )
