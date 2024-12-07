@@ -16,6 +16,7 @@ import csv
 import uuid
 
 from typing import List
+import argparse
 
 S3 = True
 
@@ -41,7 +42,6 @@ TEST_S3_PATHS = {
     },
 }
 
-EC2_MEMORY=256
 RUN_TYPE = "one_year"
 TIME_CHUNK = -1
 LAT_CHUNK = 30
@@ -197,9 +197,13 @@ def calc(config: RunConfig) -> xr.Dataset:
     finally:
         client.close()
 
+def parse_args():
+    parser = argparse.ArgumentParser(description="Run Dask EC2 Test")
+    parser.add_argument("--ec2_type", type=str, required=True, help="EC2 instance type")
+    return parser.parse_args()
 
-def main():
-
+def main(ec2_type: str):
+    
     run_id = uuid.uuid4().int
     if S3:
         urls = TEST_S3_PATHS[RUN_TYPE]["s3"]
@@ -235,7 +239,7 @@ def main():
             "rechunk_n_workers",
             "calc_n_workers",
             "threads_per_worker",
-            "ec2_ram",
+            "ec2_type",
             "lat_chunk",
             "lon_chunk",
             "load_time",
@@ -307,7 +311,7 @@ def main():
         result.config.rechunk_n_workers,
         result.config.calc_n_workers,
         result.config.threads_per_worker,
-        EC2_MEMORY,
+        ec2_type,
         result.config.lat_chunk,
         result.config.lon_chunk,
         result.load_time,
@@ -323,4 +327,5 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    args = parse_args()
+    main(ec2_type=args.ec2_type)
