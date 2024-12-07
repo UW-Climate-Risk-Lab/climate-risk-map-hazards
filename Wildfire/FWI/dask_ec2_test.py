@@ -113,23 +113,19 @@ def download_s3_files_to_temp(s3_uris: List[str], temp_dir: str) -> List[str]:
     return local_files
 
 
-def load_data(config: RunConfig) -> xr.Dataset:
+def load_data(config: RunConfig, temp_dir: str) -> xr.Dataset:
     """
     Downloads data from S3 (if needed), loads it with xarray, and cleans up temporary files.
     """
     if config.s3:
-        # Step 1: Create a temporary directory
-        temp_dir = tempfile.mkdtemp()
+        
         try:
-            # Step 2: Download files from S3 to the temporary directory
+            # Step 1: Download files from S3 to the temporary directory
             local_files = download_s3_files_to_temp(config.input_uris, temp_dir)
 
-            # Step 3: Load data using xarray
+            # Step 2: Load data using xarray
             ds = xr.open_mfdataset(local_files, engine="h5netcdf")
         finally:
-            # Step 4: Clean up the temporary directory
-            print(f"Deleting temporary directory: {temp_dir}")
-            shutil.rmtree(temp_dir)
             return ds
     else:
         # Directly load data if not using S3
@@ -230,7 +226,8 @@ def main():
     print(f"Running configuration: {config}")
 
     start_time = time.time()
-    ds = load_data(config)
+    temp_dir = tempfile.mkdtemp()
+    ds = load_data(config, temp_dir)
     load_elapsed_time = time.time() - start_time
 
     # First, rechunk data and store on disk as zarr
@@ -241,6 +238,9 @@ def main():
     except Exception as e:
         print(f"Configuration {config.run_id} rechunk failed: {e}")
         rechunk_elapsed_time = -999
+    finally:
+        print(f"Deleting temporary directory: {temp_dir}")
+        shutil.rmtree(temp_dir)
 
     # Then, process the rechunked data
     start_time = time.time()
