@@ -246,7 +246,7 @@ def main(ec2_type: str):
     ds = load_data(config, temp_dir)
     load_elapsed_time = time.time() - start_time
 
-    if RECHUNK:
+    if False:
         start_time = time.time()
         try:
             rechunk(ds, config)
