@@ -76,18 +76,37 @@ class Results:
     write_time: float # seconds
 
 
-def get_last_completed_run(csv_file: str) -> int:
-    if not os.path.exists(csv_file):
-        return 0
+def get_last_completed_run(s3_client, bucket: str, key: str) -> int:
     try:
-        with open(csv_file, "r") as f:
-            reader = csv.DictReader(f)
-            completed_runs = [int(row["run_id"]) for row in reader]
-            return max(completed_runs) if completed_runs else 0
-    except:
+        obj = s3_client.get_object(Bucket=bucket, Key=key)
+        csv_content = obj['Body'].read().decode('utf-8').splitlines()
+        reader = csv.DictReader(csv_content)
+        completed_runs = [int(row["run_id"]) for row in reader]
+        return max(completed_runs) if completed_runs else 0
+    except s3_client.exceptions.NoSuchKey:
+        return 0
+    except Exception as e:
+        print(f"Error reading CSV from S3: {e}")
         return 0
 
+def read_csv_from_s3(s3_client, bucket: str, key: str) -> List[List[str]]:
+    try:
+        obj = s3_client.get_object(Bucket=bucket, Key=key)
+        csv_content = obj['Body'].read().decode('utf-8').splitlines()
+        reader = csv.reader(csv_content)
+        return list(reader)
+    except s3_client.exceptions.NoSuchKey:
+        return []
+    except Exception as e:
+        print(f"Error reading CSV from S3: {e}")
+        return []
 
+def write_csv_to_s3(s3_client, bucket: str, key: str, rows: List[List[str]]):
+    try:
+        csv_content = "\n".join([",".join(map(str, row)) for row in rows])
+        s3_client.put_object(Bucket=bucket, Key=key, Body=csv_content)
+    except Exception as e:
+        print(f"Error writing CSV to S3: {e}")
 
 def download_s3_files_to_temp(s3_uris: List[str], temp_dir: str) -> List[str]:
     """
@@ -202,26 +221,28 @@ def main():
         output_uri=f"s3://uw-climaterisklab/scratch/{run_id}.zarr",
     )
 
-    csv_file = "timed_results.csv"
-    if not os.path.exists(csv_file):
-        with open(csv_file, mode="w", newline="") as file:
-            writer = csv.writer(file)
-            writer.writerow(
-                [
-                    "run_id",
-                    "run_type",
-                    "rechunk_n_workers",
-                    "calc_n_workers",
-                    "threads_per_worker",
-                    "memory_limit",
-                    "lat_chunk",
-                    "lon_chunk",
-                    "load_time",
-                    "rechunk_time",
-                    "calc_time",
-                    "write_time"
-                ]
-            )
+    s3_client = boto3.client("s3")
+    bucket = "uw-climaterisklab"
+    csv_key = "scratch/dask_results.csv"
+
+    csv_file_exists = True
+    csv_rows = read_csv_from_s3(s3_client, bucket, csv_key)
+    if not csv_rows:
+        csv_file_exists = False
+        csv_rows.append([
+            "run_id",
+            "run_type",
+            "rechunk_n_workers",
+            "calc_n_workers",
+            "threads_per_worker",
+            "memory_limit",
+            "lat_chunk",
+            "lon_chunk",
+            "load_time",
+            "rechunk_time",
+            "calc_time",
+            "write_time"
+        ])
 
     print(f"Running configuration: {config}")
 
@@ -269,6 +290,7 @@ def main():
         else:
             write_time = -999
     except Exception as e:
+        write_time = -999
         print(f"Error writing to s3: {str(e)}")
 
     result = Results(
@@ -279,25 +301,22 @@ def main():
             write_time=write_time
         )
 
-    with open(csv_file, mode="a", newline="") as file:
-        writer = csv.writer(file)
-        writer.writerow(
-            [
-                result.config.run_id,
-                result.config.run_type,
-                result.config.rechunk_n_workers,
-                result.config.calc_n_workers,
-                result.config.threads_per_worker,
-                result.config.memory_limit,
-                result.config.lat_chunk,
-                result.config.lon_chunk,
-                result.load_time,
-                result.rechunk_time,
-                result.calc_time,
-                result.write_time
-            ]
-        )
+    csv_rows.append([
+        result.config.run_id,
+        result.config.run_type,
+        result.config.rechunk_n_workers,
+        result.config.calc_n_workers,
+        result.config.threads_per_worker,
+        result.config.memory_limit,
+        result.config.lat_chunk,
+        result.config.lon_chunk,
+        result.load_time,
+        result.rechunk_time,
+        result.calc_time,
+        result.write_time
+    ])
 
+    write_csv_to_s3(s3_client, bucket, csv_key, csv_rows)
 
     if os.path.exists(config.zarr_store):
         shutil.rmtree(config.zarr_store)
