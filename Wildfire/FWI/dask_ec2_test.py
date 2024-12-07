@@ -148,8 +148,13 @@ def calc(ds: xr.Dataset, config: RunConfig, tempdir: str) -> xr.Dataset:
         "lon": config.lon_chunk,
         }
         ds = ds.chunk(target_chunks)
+        try:
+            tas = ds.tas
+        except:
+            tas = ds.tasmax
+        
         out_fwi = xclim.indicators.atmos.cffwis_indices(
-            tas=ds.tas,
+            tas=tas,
             pr=ds.pr,
             hurs=ds.hurs,
             sfcWind=ds.sfcWind,
