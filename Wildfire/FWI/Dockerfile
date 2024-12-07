@@ -16,6 +16,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application code
 COPY dask_ec2_test.py .
+COPY o1_optimized_script.py .
 
 # Expose ports for Dask dashboard (8787 is default)
 EXPOSE 8787
@@ -24,7 +25,7 @@ EXPOSE 8787
 ENV PYTHONUNBUFFERED=1
 
 # Set the entrypoint to run the Python script
-ENTRYPOINT ["python", "dask_ec2_test.py"]
+ENTRYPOINT ["python", "o1_optimized_script.py"]
 
 # Provide a default argument that can be overridden
 CMD ["--ec2_type", "t2.micro"]
