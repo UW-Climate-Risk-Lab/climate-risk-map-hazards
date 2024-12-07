@@ -19,7 +19,7 @@ from typing import List
 import argparse
 
 S3 = True
-RECHUNK = False
+WRITE = True
 
 TEST_S3_PATHS = {
     "one_year": {
@@ -135,25 +135,6 @@ def load_data(config: RunConfig, temp_dir: str) -> xr.Dataset:
 
         return ds
 
-def rechunk(ds: xr.Dataset, config: RunConfig):
-    client = Client(
-        n_workers=config.rechunk_n_workers,
-        threads_per_worker=THREADS,
-        memory_limit="auto",
-    )
-    try:
-        target_chunks = {
-            "time": config.time_chunk,
-            "lat": config.lat_chunk,
-            "lon": config.lon_chunk,
-        }  # Use -1 to make 'time' a single chunk
-        rechunked = ds.chunk(target_chunks)
-
-        # Save to Zarr for efficient rechunking
-        rechunked.to_zarr(config.zarr_store, mode="w")
-    finally:
-        client.close()
-
 
 def calc(ds: xr.Dataset, config: RunConfig, tempdir: str) -> xr.Dataset:
     client = Client(
@@ -162,14 +143,12 @@ def calc(ds: xr.Dataset, config: RunConfig, tempdir: str) -> xr.Dataset:
         memory_limit="auto",
     )
     try:
-        if RECHUNK:
-            target_chunks = {
-            "time": config.time_chunk,
-            "lat": config.lat_chunk,
-            "lon": config.lon_chunk,
-            }
-            ds = ds.chunk(target_chunks)
-            #ds = xr.open_zarr(config.zarr_store)
+        target_chunks = {
+        "time": config.time_chunk,
+        "lat": config.lat_chunk,
+        "lon": config.lon_chunk,
+        }
+        ds = ds.chunk(target_chunks)
         out_fwi = xclim.indicators.atmos.cffwis_indices(
             tas=ds.tas,
             pr=ds.pr,
@@ -246,20 +225,6 @@ def main(ec2_type: str):
     ds = load_data(config, temp_dir)
     load_elapsed_time = time.time() - start_time
 
-    if False:
-        start_time = time.time()
-        try:
-            rechunk(ds, config)
-            rechunk_elapsed_time = time.time() - start_time
-        except Exception as e:
-            print(f"Configuration {config.run_id} rechunk failed: {e}")
-            rechunk_elapsed_time = -999
-        finally:
-            print(f"Deleting temporary directory: {temp_dir}")
-            shutil.rmtree(temp_dir)
-    else:
-        rechunk_elapsed_time = -999
-
     # Then, process the rechunked data
     start_time = time.time()
     try:
@@ -295,7 +260,7 @@ def main(ec2_type: str):
     result = Results(
             config=config,
             load_time=load_elapsed_time,
-            rechunk_time=rechunk_elapsed_time,
+            rechunk_time=-999, # Rechunk part of calc
             calc_time=calc_elapsed_time,
             write_time=write_time
         )
