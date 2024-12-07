@@ -225,7 +225,7 @@ def main(ec2_type: str):
             ds_fwi.fwi.to_zarr(
                 store=s3fs.S3Map(root=config.output_uri, s3=fs),
                 mode="w",
-                consolidated=True
+                consolidated=False
             )
             write_time = time.time() - start_time
         except Exception as e:
