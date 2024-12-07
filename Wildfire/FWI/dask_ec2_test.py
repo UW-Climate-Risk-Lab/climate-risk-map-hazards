@@ -47,7 +47,6 @@ RUN_TYPE = "one_year"
 TIME_CHUNK = -1
 LAT_CHUNK = 30
 LON_CHUNK = 72
-RECHUNK_N_WORKERS = multiprocessing.cpu_count()
 CALC_N_WORKERS = multiprocessing.cpu_count()
 THREADS = 2
 
@@ -183,7 +182,7 @@ def main(ec2_type: str):
         run_id=run_id,
         run_type=RUN_TYPE,
         calc_n_workers=CALC_N_WORKERS,
-        rechunk_n_workers=RECHUNK_N_WORKERS,
+        rechunk_n_workers=CALC_N_WORKERS,
         threads_per_worker=THREADS,
         time_chunk=TIME_CHUNK,
         lat_chunk=LAT_CHUNK,
