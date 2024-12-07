@@ -41,7 +41,7 @@ TEST_S3_PATHS = {
     },
 }
 
-
+EC2_MEMORY=256
 RUN_TYPE = "one_year"
 TIME_CHUNK = -1
 LAT_CHUNK = 30
@@ -235,7 +235,7 @@ def main():
             "rechunk_n_workers",
             "calc_n_workers",
             "threads_per_worker",
-            "memory_limit",
+            "ec2_ram",
             "lat_chunk",
             "lon_chunk",
             "load_time",
@@ -307,7 +307,7 @@ def main():
         result.config.rechunk_n_workers,
         result.config.calc_n_workers,
         result.config.threads_per_worker,
-        result.config.memory_limit,
+        EC2_MEMORY,
         result.config.lat_chunk,
         result.config.lon_chunk,
         result.load_time,
