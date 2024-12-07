@@ -242,6 +242,11 @@ def main(ec2_type: str):
 
     
     try:
+        client = Client(
+            n_workers=config.calc_n_workers,
+            threads_per_worker=config.threads_per_worker,
+            memory_limit="auto",
+            )
         start_time = time.time()
         if S3 and (ds is not None) and WRITE:
             fs = s3fs.S3FileSystem(anon=False)
@@ -256,6 +261,8 @@ def main(ec2_type: str):
     except Exception as e:
         write_time = -999
         print(f"Error writing to s3: {str(e)}")
+    finally:
+        client.close()
 
     result = Results(
             config=config,
