@@ -19,6 +19,7 @@ from typing import List
 import argparse
 
 S3 = True
+RECHUNK = False
 
 TEST_S3_PATHS = {
     "one_year": {
@@ -75,19 +76,6 @@ class Results:
     calc_time: float  # seconds
     write_time: float # seconds
 
-
-def get_last_completed_run(s3_client, bucket: str, key: str) -> int:
-    try:
-        obj = s3_client.get_object(Bucket=bucket, Key=key)
-        csv_content = obj['Body'].read().decode('utf-8').splitlines()
-        reader = csv.DictReader(csv_content)
-        completed_runs = [int(row["run_id"]) for row in reader]
-        return max(completed_runs) if completed_runs else 0
-    except s3_client.exceptions.NoSuchKey:
-        return 0
-    except Exception as e:
-        print(f"Error reading CSV from S3: {e}")
-        return 0
 
 def read_csv_from_s3(s3_client, bucket: str, key: str) -> List[List[str]]:
     try:
@@ -172,14 +160,17 @@ def rechunk(ds: xr.Dataset, config: RunConfig):
         client.close()
 
 
-def calc(config: RunConfig) -> xr.Dataset:
+def calc(config: RunConfig, tempdir: str) -> xr.Dataset:
     client = Client(
         n_workers=config.calc_n_workers,
         threads_per_worker=config.threads_per_worker,
         memory_limit="auto",
     )
     try:
-        ds = xr.open_zarr(config.zarr_store)
+        if RECHUNK:
+            ds = xr.open_zarr(config.zarr_store)
+        else:
+            ds = load_data(config, tempdir)
         out_fwi = xclim.indicators.atmos.cffwis_indices(
             tas=ds.tas,
             pr=ds.pr,
@@ -250,31 +241,31 @@ def main(ec2_type: str):
 
     print(f"Running configuration: {config}")
 
-    start_time = time.time()
+    config_start_time = time.time()
     temp_dir = tempfile.mkdtemp()
     ds = load_data(config, temp_dir)
     load_elapsed_time = time.time() - start_time
 
-    # First, rechunk data and store on disk as zarr
-    start_time = time.time()
-    try:
-        rechunk(ds, config)
-        rechunk_elapsed_time = time.time() - start_time
-    except Exception as e:
-        print(f"Configuration {config.run_id} rechunk failed: {e}")
+    if RECHUNK:
+        # First, rechunk data and store on disk as zarr
+        start_time = time.time()
+        try:
+            rechunk(ds, config)
+            rechunk_elapsed_time = time.time() - start_time
+        except Exception as e:
+            print(f"Configuration {config.run_id} rechunk failed: {e}")
+            rechunk_elapsed_time = -999
+        finally:
+            print(f"Deleting temporary directory: {temp_dir}")
+            shutil.rmtree(temp_dir)
+    else:
         rechunk_elapsed_time = -999
-    finally:
-        print(f"Deleting temporary directory: {temp_dir}")
-        shutil.rmtree(temp_dir)
 
     # Then, process the rechunked data
     start_time = time.time()
     try:
-        ds = calc(config)
+        ds = calc(config, temp_dir)
         calc_elapsed_time = time.time() - start_time
-        print(
-            f"Configuration {config.run_id} completed in {calc_elapsed_time:.2f} seconds."
-        )
     except Exception as e:
         ds = None
         calc_elapsed_time = -999
@@ -325,6 +316,10 @@ def main(ec2_type: str):
     if os.path.exists(config.zarr_store):
         shutil.rmtree(config.zarr_store)
 
+    config_elapsed_time = time.time() - config_start_time
+    print(
+            f"Configuration {config.run_id} completed in {config_elapsed_time:.2f} seconds."
+        )
 
 if __name__ == "__main__":
     args = parse_args()
