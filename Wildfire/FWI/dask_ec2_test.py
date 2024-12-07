@@ -283,7 +283,7 @@ def main(ec2_type: str):
     
     try:
         start_time = time.time()
-        if S3 & ds:
+        if S3 and ds is not None:
             fs = s3fs.S3FileSystem(anon=False)
             ds.to_zarr(
                 store=s3fs.S3Map(root=config.output_uri, s3=fs),
