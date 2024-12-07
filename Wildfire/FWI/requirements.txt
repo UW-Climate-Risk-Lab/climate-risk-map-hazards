@@ -4,3 +4,6 @@ dask
 zarr
 h5netcdf
 distributed
+s3fs
+boto3
+bokeh

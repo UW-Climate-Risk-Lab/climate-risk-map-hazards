@@ -6,23 +6,28 @@ import xclim
 import time
 import os
 import shutil
-import fsspec
 import s3fs
+import tempfile
+import boto3
+import multiprocessing
 
 from dataclasses import dataclass
 import csv
 import uuid
 
+from typing import List
+
 S3 = True
 
 TEST_S3_PATHS = {
     "one_year": {
-        "s3_paths": [
-            "s3://uw-climaterisklab/scratch/hurs_day_CESM2_ssp126_r4i1p1f1_gn_2030_v1.1.nc",
-            "s3://uw-climaterisklab/scratch/pr_day_CESM2_ssp126_r4i1p1f1_gn_2030_v1.1.nc",
-            "s3://uw-climaterisklab/scratch/sfcWind_day_CESM2_ssp126_r4i1p1f1_gn_2030.nc",
-            "s3://uw-climaterisklab/scratch/tas_day_CESM2_ssp126_r4i1p1f1_gn_2030.nc",
-        ],
+        "s3": [
+            "s3://uw-climaterisklab/scratch/climate_calc_test/one_year/hurs_day_CESM2_ssp126_r4i1p1f1_gn_2030_v1.1.nc",
+            "s3://uw-climaterisklab/scratch/climate_calc_test/one_year/pr_day_CESM2_ssp126_r4i1p1f1_gn_2030_v1.1.nc",
+            "s3://uw-climaterisklab/scratch/climate_calc_test/one_year/sfcWind_day_CESM2_ssp126_r4i1p1f1_gn_2030.nc",
+            "s3://uw-climaterisklab/scratch/climate_calc_test/one_year/tas_day_CESM2_ssp126_r4i1p1f1_gn_2030.nc",
+        ]
+        ,
         "local": [],
     },
     "hundred_year": {
@@ -41,9 +46,8 @@ RUN_TYPE = "one_year"
 TIME_CHUNK = -1
 LAT_CHUNK = 30
 LON_CHUNK = 72
-MAX_MEMORY = 80
-RECHUNK_N_WORKERS = 2
-CALC_N_WORKERS = 4
+RECHUNK_N_WORKERS = multiprocessing.cpu_count()
+CALC_N_WORKERS = multiprocessing.cpu_count()
 THREADS = 2
 
 
@@ -72,10 +76,6 @@ class Results:
     write_time: float # seconds
 
 
-def maximize_memory(n_workers: int, max_memory: int):
-    return int(max_memory / n_workers)
-
-
 def get_last_completed_run(csv_file: str) -> int:
     if not os.path.exists(csv_file):
         return 0
@@ -88,21 +88,60 @@ def get_last_completed_run(csv_file: str) -> int:
         return 0
 
 
-def load_data(config: RunConfig) -> xr.Dataset:
-    if config.s3:
-        fs = fsspec.filesystem("s3")
-        with fs.open_files(config.input_uris) as fileObj:
-            ds = xr.open_mfdataset(fileObj, engine="h5netcdf")
-    else:
-        ds = xr.open_mfdataset(config.input_uris)
-    return ds
 
+def download_s3_files_to_temp(s3_uris: List[str], temp_dir: str) -> List[str]:
+    """
+    Downloads files from S3 to a temporary local directory.
+    
+    Parameters:
+        s3_uris: List of S3 URIs (s3://bucket/path)
+        temp_dir: Path to the local temporary directory
+    
+    Returns:
+        List of local file paths
+    """
+    s3 = boto3.client("s3")
+    local_files = []
+
+    for uri in s3_uris:
+        bucket, key = uri.replace("s3://", "").split("/", 1)
+        local_path = os.path.join(temp_dir, os.path.basename(key))
+        print(f"Downloading {uri} to {local_path}...")
+        s3.download_file(bucket, key, local_path)
+        local_files.append(local_path)
+
+    return local_files
+
+
+def load_data(config: RunConfig) -> xr.Dataset:
+    """
+    Downloads data from S3 (if needed), loads it with xarray, and cleans up temporary files.
+    """
+    if config.s3:
+        # Step 1: Create a temporary directory
+        temp_dir = tempfile.mkdtemp()
+        try:
+            # Step 2: Download files from S3 to the temporary directory
+            local_files = download_s3_files_to_temp(config.input_uris, temp_dir)
+
+            # Step 3: Load data using xarray
+            ds = xr.open_mfdataset(local_files, engine="h5netcdf")
+        finally:
+            # Step 4: Clean up the temporary directory
+            print(f"Deleting temporary directory: {temp_dir}")
+            shutil.rmtree(temp_dir)
+            return ds
+    else:
+        # Directly load data if not using S3
+        ds = xr.open_mfdataset(config.input_uris, engine="h5netcdf")
+
+        return ds
 
 def rechunk(ds: xr.Dataset, config: RunConfig):
     client = Client(
         n_workers=config.rechunk_n_workers,
         threads_per_worker=THREADS,
-        memory_limit=int(MAX_MEMORY / RECHUNK_N_WORKERS),
+        memory_limit="auto",
     )
     try:
         target_chunks = {
@@ -122,7 +161,7 @@ def calc(config: RunConfig) -> xr.Dataset:
     client = Client(
         n_workers=config.calc_n_workers,
         threads_per_worker=config.threads_per_worker,
-        memory_limit=int(MAX_MEMORY / config.calc_n_workers),
+        memory_limit="auto",
     )
     try:
         ds = xr.open_zarr(config.zarr_store)
@@ -212,13 +251,14 @@ def main():
             f"Configuration {config.run_id} completed in {calc_elapsed_time:.2f} seconds."
         )
     except Exception as e:
+        ds = None
         calc_elapsed_time = -999
         print(f"Configuration {config.run_id} calc failed: {e}")
 
     
     try:
         start_time = time.time()
-        if S3:
+        if S3 & ds:
             fs = s3fs.S3FileSystem(anon=False)
             ds.to_zarr(
                 store=s3fs.S3Map(root=config.output_uri, s3=fs),
