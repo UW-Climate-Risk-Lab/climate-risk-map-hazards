@@ -69,7 +69,6 @@ class RunConfig:
 class Results:
     config: RunConfig
     load_time: float
-    rechunk_time: float  # second
     calc_time: float  # seconds
     write_time: float # seconds
 
@@ -173,7 +172,6 @@ def main(ec2_type: str):
             "lat_chunk",
             "lon_chunk",
             "load_time",
-            "rechunk_time",
             "calc_time",
             "write_time"
         ])
@@ -240,7 +238,6 @@ def main(ec2_type: str):
     result = Results(
         config=config,
         load_time=load_elapsed_time,
-        rechunk_time=-999, # No separate rechunk step (integrated into calc)
         calc_time=calc_elapsed_time,
         write_time=write_time
     )
@@ -255,7 +252,6 @@ def main(ec2_type: str):
         result.config.lat_chunk,
         result.config.lon_chunk,
         result.load_time,
-        result.rechunk_time,
         result.calc_time,
         result.write_time
     ])
