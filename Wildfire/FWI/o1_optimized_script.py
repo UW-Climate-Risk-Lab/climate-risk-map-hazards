@@ -45,8 +45,8 @@ RUN_TYPE = "one_year"
 TIME_CHUNK = -1
 LAT_CHUNK = 30
 LON_CHUNK = 72
-CALC_N_WORKERS = 96
-THREADS = 1
+CALC_N_WORKERS = 64
+THREADS = 4
 
 
 @dataclass
@@ -199,7 +199,7 @@ def main(ec2_type: str):
         engine="h5netcdf",
         decode_times=True,
         combine='by_coords',
-        chunks={}
+        chunks='auto'
     )
 
     # Persisting the dataset into cluster memory (if memory allows)
@@ -224,7 +224,7 @@ def main(ec2_type: str):
         try:
             fs = s3fs.S3FileSystem(anon=False)
             # Let to_zarr() handle the computation
-            ds_fwi.to_zarr(
+            ds_fwi.fwi.to_zarr(
                 store=s3fs.S3Map(root=config.output_uri, s3=fs),
                 mode="w",
                 consolidated=True
