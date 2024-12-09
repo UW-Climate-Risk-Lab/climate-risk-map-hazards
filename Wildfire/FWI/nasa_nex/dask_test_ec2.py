@@ -8,6 +8,7 @@ import shutil
 import s3fs
 import fsspec
 import boto3
+import tempfile
 import multiprocessing
 
 from dataclasses import dataclass
@@ -71,6 +72,20 @@ class Results:
     load_time: float
     calc_time: float  # seconds
     write_time: float # seconds
+
+def upload_directory_to_s3(local_path, bucket, prefix):
+    s3_client = boto3.client('s3')
+    
+    # Walk through all files in directory
+    for root, dirs, files in os.walk(local_path):
+        for filename in files:
+            local_file = os.path.join(root, filename)
+            # Construct S3 key maintaining directory structure
+            relative_path = os.path.relpath(local_file, local_path)
+            s3_key = os.path.join(prefix, relative_path)
+            
+            # Upload file
+            s3_client.upload_file(local_file, bucket, s3_key)
 
 
 def read_csv_from_s3(s3_client, bucket: str, key: str) -> List[List[str]]:
@@ -153,11 +168,11 @@ def main(ec2_type: str):
         zarr_store=f"r{run_id}.zarr",
         s3=S3,
         input_uris=urls,
-        output_uri=f"s3://uw-climaterisklab/scratch/{run_id}.zarr",
+        output_uri=f"s3://uw-crl/scratch/{run_id}.zarr",
     )
 
     s3_client = boto3.client("s3")
-    bucket = "uw-climaterisklab"
+    bucket = "uw-crl"
     csv_key = "scratch/dask_results.csv"
 
     csv_rows = read_csv_from_s3(s3_client, bucket, csv_key)
@@ -220,14 +235,27 @@ def main(ec2_type: str):
     write_time = -999
     if ds_fwi is not None and S3 and WRITE:
         try:
-            fs = s3fs.S3FileSystem(anon=False)
-            # Let to_zarr() handle the computation
-            ds_fwi.fwi.to_zarr(
-                store=s3fs.S3Map(root=config.output_uri, s3=fs),
-                mode="w",
-                consolidated=False
-            )
-            write_time = time.time() - start_time
+            # Create temporary directory
+            with tempfile.TemporaryDirectory() as tmp_dir:
+                local_zarr_path = os.path.join(tmp_dir, 'temp.zarr')
+                
+                # Write locally first
+                ds_fwi.fwi.to_zarr(
+                    store=local_zarr_path,
+                    mode="w",
+                    consolidated=False
+                )
+                
+                # Parse S3 URI to get bucket and prefix
+                s3_parts = config.output_uri.replace('s3://', '').split('/', 1)
+                bucket = s3_parts[0]
+                prefix = s3_parts[1] if len(s3_parts) > 1 else ''
+                
+                # Upload to S3
+                upload_directory_to_s3(local_zarr_path, bucket, prefix)
+                
+                write_time = time.time() - start_time
+                
         except Exception as e:
             write_time = -999
             print(f"Error writing to s3: {str(e)}")
