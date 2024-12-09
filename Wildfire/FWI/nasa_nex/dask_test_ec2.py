@@ -240,7 +240,12 @@ def main(ec2_type: str):
     write_time = -999
     if ds_fwi is not None and S3 and WRITE:
         try:
-            fs = s3fs.S3FileSystem(anon=False)
+            fs = s3fs.S3FileSystem(anon=False,
+                                    use_ssl=True,
+                                    client_kwargs={
+                                        'aws_access_key_id': None,  # Will force boto to look for credentials
+                                        'aws_secret_access_key': None,
+                                    })
             # Let to_zarr() handle the computation
             ds_fwi.to_zarr(
                 store=s3fs.S3Map(root=config.output_uri, s3=fs),
