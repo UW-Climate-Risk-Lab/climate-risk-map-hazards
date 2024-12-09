@@ -235,26 +235,14 @@ def main(ec2_type: str):
     write_time = -999
     if ds_fwi is not None and S3 and WRITE:
         try:
-            # Create temporary directory
-            with tempfile.TemporaryDirectory() as tmp_dir:
-                local_zarr_path = os.path.join(tmp_dir, 'temp.zarr')
-                
-                # Write locally first
-                ds_fwi.fwi.to_zarr(
-                    store=local_zarr_path,
-                    mode="w",
-                    consolidated=False
-                )
-                
-                # Parse S3 URI to get bucket and prefix
-                s3_parts = config.output_uri.replace('s3://', '').split('/', 1)
-                bucket = s3_parts[0]
-                prefix = s3_parts[1] if len(s3_parts) > 1 else ''
-                
-                # Upload to S3
-                upload_directory_to_s3(local_zarr_path, bucket, prefix)
-                
-                write_time = time.time() - start_time
+            fs = s3fs.S3FileSystem(anon=False)
+            # Let to_zarr() handle the computation
+            ds_fwi.to_zarr(
+                store=s3fs.S3Map(root=config.output_uri, s3=fs),
+                mode="w",
+                consolidated=False
+            )
+            write_time = time.time() - start_time
                 
         except Exception as e:
             write_time = -999
