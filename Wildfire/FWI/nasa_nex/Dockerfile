@@ -15,7 +15,6 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application code
-COPY dask_ec2_test.py .
 COPY o1_optimized_script.py .
 
 # Expose ports for Dask dashboard (8787 is default)
