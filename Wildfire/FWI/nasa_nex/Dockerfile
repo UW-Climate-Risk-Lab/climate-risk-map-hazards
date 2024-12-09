@@ -24,7 +24,7 @@ EXPOSE 8787
 ENV PYTHONUNBUFFERED=1
 
 # Set the entrypoint to run the Python script
-ENTRYPOINT ["python", "o1_optimized_script.py"]
+ENTRYPOINT ["python", "dask_test_ec2.py"]
 
 # Provide a default argument that can be overridden
 CMD ["--ec2_type", "t2.micro"]
