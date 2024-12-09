@@ -49,6 +49,12 @@ LON_CHUNK = 72
 CALC_N_WORKERS = 64
 THREADS = 4
 
+# US
+LAT_MIN = 10
+LAT_MAX = 50
+LON_MIN = 230
+LON_MAX = 300
+
 
 @dataclass
 class RunConfig:
@@ -71,11 +77,12 @@ class Results:
     config: RunConfig
     load_time: float
     calc_time: float  # seconds
-    write_time: float # seconds
+    write_time: float  # seconds
+
 
 def upload_directory_to_s3(local_path, bucket, prefix):
-    s3_client = boto3.client('s3')
-    
+    s3_client = boto3.client("s3")
+
     # Walk through all files in directory
     for root, dirs, files in os.walk(local_path):
         for filename in files:
@@ -83,7 +90,7 @@ def upload_directory_to_s3(local_path, bucket, prefix):
             # Construct S3 key maintaining directory structure
             relative_path = os.path.relpath(local_file, local_path)
             s3_key = os.path.join(prefix, relative_path)
-            
+
             # Upload file
             s3_client.upload_file(local_file, bucket, s3_key)
 
@@ -91,7 +98,7 @@ def upload_directory_to_s3(local_path, bucket, prefix):
 def read_csv_from_s3(s3_client, bucket: str, key: str) -> List[List[str]]:
     try:
         obj = s3_client.get_object(Bucket=bucket, Key=key)
-        csv_content = obj['Body'].read().decode('utf-8').splitlines()
+        csv_content = obj["Body"].read().decode("utf-8").splitlines()
         reader = csv.reader(csv_content)
         return list(reader)
     except s3_client.exceptions.NoSuchKey:
@@ -177,19 +184,21 @@ def main(ec2_type: str):
 
     csv_rows = read_csv_from_s3(s3_client, bucket, csv_key)
     if not csv_rows:
-        csv_rows.append([
-            "run_id",
-            "run_type",
-            "rechunk_n_workers",
-            "calc_n_workers",
-            "threads_per_worker",
-            "ec2_type",
-            "lat_chunk",
-            "lon_chunk",
-            "load_time",
-            "calc_time",
-            "write_time"
-        ])
+        csv_rows.append(
+            [
+                "run_id",
+                "run_type",
+                "rechunk_n_workers",
+                "calc_n_workers",
+                "threads_per_worker",
+                "ec2_type",
+                "lat_chunk",
+                "lon_chunk",
+                "load_time",
+                "calc_time",
+                "write_time",
+            ]
+        )
 
     print(f"Running configuration: {config}")
 
@@ -205,18 +214,14 @@ def main(ec2_type: str):
     # Load data directly from S3 using fsspec and xarray
     # Disable unnecessary decoding to speed up
     start_time = time.time()
-    fs = fsspec.filesystem('s3', anon=True)
+    fs = fsspec.filesystem("s3", anon=True)
     flist = [fs.open(path, mode="rb") for path in config.input_uris]
     ds = xr.open_mfdataset(
-        flist,
-        engine="h5netcdf",
-        decode_times=True,
-        combine='by_coords',
-        chunks='auto'
+        flist, engine="h5netcdf", decode_times=True, combine="by_coords", chunks="auto"
     )
 
     # Persisting the dataset into cluster memory (if memory allows)
-    ds = ds.persist()
+    ds = ds.sel(lat=slice(LAT_MIN, LAT_MAX), lon=slice(LON_MIN, LON_MAX)).persist()
 
     load_elapsed_time = time.time() - start_time
 
@@ -240,10 +245,10 @@ def main(ec2_type: str):
             ds_fwi.to_zarr(
                 store=s3fs.S3Map(root=config.output_uri, s3=fs),
                 mode="w",
-                consolidated=False
+                consolidated=False,
             )
             write_time = time.time() - start_time
-                
+
         except Exception as e:
             write_time = -999
             print(f"Error writing to s3: {str(e)}")
@@ -255,22 +260,24 @@ def main(ec2_type: str):
         config=config,
         load_time=load_elapsed_time,
         calc_time=calc_elapsed_time,
-        write_time=write_time
+        write_time=write_time,
     )
 
-    csv_rows.append([
-        result.config.run_id,
-        result.config.run_type,
-        result.config.rechunk_n_workers,
-        result.config.calc_n_workers,
-        result.config.threads_per_worker,
-        ec2_type,
-        result.config.lat_chunk,
-        result.config.lon_chunk,
-        result.load_time,
-        result.calc_time,
-        result.write_time
-    ])
+    csv_rows.append(
+        [
+            result.config.run_id,
+            result.config.run_type,
+            result.config.rechunk_n_workers,
+            result.config.calc_n_workers,
+            result.config.threads_per_worker,
+            ec2_type,
+            result.config.lat_chunk,
+            result.config.lon_chunk,
+            result.load_time,
+            result.calc_time,
+            result.write_time,
+        ]
+    )
 
     write_csv_to_s3(s3_client, bucket, csv_key, csv_rows)
 
@@ -279,7 +286,9 @@ def main(ec2_type: str):
         shutil.rmtree(config.zarr_store)
 
     config_elapsed_time = time.time() - config_start_time
-    print(f"Configuration {config.run_id} completed in {config_elapsed_time:.2f} seconds.")
+    print(
+        f"Configuration {config.run_id} completed in {config_elapsed_time:.2f} seconds."
+    )
 
 
 if __name__ == "__main__":
