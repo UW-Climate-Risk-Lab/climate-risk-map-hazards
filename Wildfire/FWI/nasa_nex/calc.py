@@ -17,14 +17,6 @@ from typing import List
 from pipeline import CalcConfig, InitialConditions
 
 
-@dataclass
-class Results:
-    config: CalcConfig
-    load_time: float
-    calc_time: float  # seconds
-    write_time: float  # seconds
-
-
 def read_csv_from_s3(s3_client, bucket: str, key: str) -> List[List[str]]:
     try:
         obj = s3_client.get_object(Bucket=bucket, Key=key)
@@ -47,17 +39,7 @@ def write_csv_to_s3(s3_client, bucket: str, key: str, rows: List[List[str]]):
 
 
 def calc(ds: xr.Dataset, config: CalcConfig) -> xr.Dataset:
-    # The client will be created once in main and passed data via persisted ds.
-    # Here we just define calculation steps.
-    target_chunks = {
-        "time": config.time_chunk,
-        "lat": config.lat_chunk,
-        "lon": config.lon_chunk,
-    }
-
-    # Re-chunk directly as desired
-    ds = ds.chunk(target_chunks)
-
+    
     # Select DataArrays for calculation
     tas = ds.tasmax
     pr = ds.pr
@@ -75,7 +57,7 @@ def calc(ds: xr.Dataset, config: CalcConfig) -> xr.Dataset:
         pr=pr,
         hurs=hurs,
         sfcWind=sfcWind,
-        lat=ds.lat,
+        lat=lat,
         ffmc0=ffmc0,
         dmc0=dmc0,
         dc0=dc0,
@@ -88,32 +70,39 @@ def calc(ds: xr.Dataset, config: CalcConfig) -> xr.Dataset:
     return ds_fwi
 
 def load(config: CalcConfig) -> xr.Dataset:
-    fs_r = fsspec.filesystem("s3", anon=True)
-    flist = [fs_r.open(path, mode="rb") for path in config.input_uris]
+    fs = fsspec.filesystem("s3", anon=True)
+    flist = [fs.open(path, mode="rb") for path in config.input_uris]
     ds = xr.open_mfdataset(
         flist, engine="h5netcdf", decode_times=True, combine="by_coords", chunks="auto"
     )
     # Persisting the bounded dataset into cluster memory (if memory allows)
-    ds = ds.sel(lat=slice(config.bbox["ymin"], config.bbox["ymax"]),
-                lon=slice(config.bbox["xmin"], config.bbox["xmax"])).persist()
+    if config.bbox:
+        ds = ds.sel(lat=slice(config.bbox.y_min, config.bbox.y_max),
+                    lon=slice(config.bbox.x_min, config.bbox.x_max))
+    
+    target_chunks = {
+        "time": config.time_chunk,
+        "lat": config.lat_chunk,
+        "lon": config.lon_chunk,
+    }
 
-    return ds
+    # Re-chunk directly as desired
+    ds = ds.chunk(target_chunks)
+
+    return ds.persist()
 
 
-def main(config: CalcConfig):
-    s3_client = boto3.client("s3")
+def main(s3_client, config: CalcConfig):
     bucket = "uw-crl"
     csv_key = "scratch/dask_results.csv"
 
     csv_rows = read_csv_from_s3(s3_client, bucket, csv_key)
     if not csv_rows:
         csv_rows.append(
-            [
-                "run_id",
-                "run_type",
-                "calc_n_workers",
+            [   
+                "output",
+                "n_workers",
                 "threads_per_worker",
-                "ec2_type",
                 "lat_chunk",
                 "lon_chunk",
                 "load_time",
@@ -128,7 +117,7 @@ def main(config: CalcConfig):
 
     # Create a single Dask client to be reused
     client = Client(
-        n_workers=config.calc_n_workers,
+        n_workers=config.n_workers,
         threads_per_worker=config.threads_per_worker,
         memory_limit="auto",
     )
@@ -137,23 +126,22 @@ def main(config: CalcConfig):
     # Disable unnecessary decoding to speed up
     start_time = time.time()
     ds = load(config)
-    load_elapsed_time = time.time() - start_time
+    load_time = time.time() - start_time
 
     # Perform calculation (no additional rechunk step separately, done inside calc)
-    start_time = time.time()
     try:
+        start_time = time.time()
         ds_fwi = calc(ds, config)
-        calc_elapsed_time = time.time() - start_time
+        calc_time = time.time() - start_time
     except Exception as e:
         ds_fwi = None
-        calc_elapsed_time = -999
-        print(f"Configuration {config.run_id} calc failed: {e}")
+        calc_time = -999
+        print(f"{config.zarr_output_uri} calc failed: {e}")
 
     # Writing results to S3 as Zarr
-    start_time = time.time()
-    write_time = -999
     if ds_fwi:
         try:
+            start_time = time.time()
             fs = s3fs.S3FileSystem(anon=False)
             # Let to_zarr() handle the computation
             ds_fwi.to_zarr(
@@ -164,39 +152,26 @@ def main(config: CalcConfig):
             write_time = time.time() - start_time
 
         except Exception as e:
+            write_time = -999
             print(f"Error writing to s3: {str(e)}")
 
     # Close the client
     client.close()
 
-    result = Results(
-        config=config,
-        load_time=load_elapsed_time,
-        calc_time=calc_elapsed_time,
-        write_time=write_time,
-    )
-
     csv_rows.append(
         [
-            result.config.run_id,
-            result.config.run_type,
-            result.config.calc_n_workers,
-            result.config.threads_per_worker,
-            result.config.lat_chunk,
-            result.config.lon_chunk,
-            result.load_time,
-            result.calc_time,
-            result.write_time,
+            config.n_workers,
+            config.threads_per_worker,
+            config.lat_chunk,
+            config.lon_chunk,
+            load_time,
+            calc_time,
+            write_time,
         ]
     )
-
     write_csv_to_s3(s3_client, bucket, csv_key, csv_rows)
-
-    # Clean up local zarr store if created (not used in this approach, but just in case)
-    if os.path.exists(config.zarr_store):
-        shutil.rmtree(config.zarr_store)
 
     config_elapsed_time = time.time() - config_start_time
     print(
-        f"Configuration {config.run_id} completed in {config_elapsed_time:.2f} seconds."
+        f"{config.zarr_output_uri} completed in {config_elapsed_time:.2f} seconds."
     )

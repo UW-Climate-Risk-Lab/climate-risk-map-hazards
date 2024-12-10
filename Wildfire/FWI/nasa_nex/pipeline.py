@@ -10,36 +10,7 @@ from urllib.parse import urlparse
 from pathlib import PurePosixPath
 from typing import Dict
 
-# Constants
-INPUT_BUCKET = "nex-gddp-cmip6"
-INPUT_PREFIX = "NEX-GDDP-CMIP6"
-OUTPUT_BUCKET = "uw-crl"
-OUTPUT_PREFIX = "climate-risk-map/backend/climate"
-
-RUN_TYPE = "one_year"
-TIME_CHUNK = -1
-LAT_CHUNK = 30
-LON_CHUNK = 72
-N_WORKERS = 20
-THREADS = 4
-
-VAR_LIST = [
-        ["tasmax"],
-        ["hurs"],
-        ["sfcWind"],
-        ["pr"]
-    ]
-
-VALID_YEARS = {
-    "historical": [i for i in range(1950, 2015)],
-    "ssp": [i for i in range(2015, 2101)]
-}
-
-# Bounding Box
-LAT_MIN = 10
-LAT_MAX = 50
-LON_MIN = 230
-LON_MAX = 300
+import constants as c
 
 @dataclass
 class BoundingBox:
@@ -84,9 +55,7 @@ class InitialConditions:
 
 @dataclass
 class CalcConfig:
-    run_id: int
-    rechunk_n_workers: int
-    calc_n_workers: int
+    n_workers: int
     threads_per_worker: int
     time_chunk: int
     lat_chunk: int
@@ -130,10 +99,10 @@ def find_best_file(s3_client, model, scenario, ensemble_member, year, var_candid
     """
     for variable in var_candidates:
         # Construct the S3 prefix path
-        var_prefix = PurePosixPath(INPUT_PREFIX, model, scenario, ensemble_member, variable)
+        var_prefix = PurePosixPath(c.INPUT_PREFIX, model, scenario, ensemble_member, variable)
         
         # List objects in the S3 bucket under the given prefix
-        response = s3_client.list_objects_v2(Bucket=INPUT_BUCKET, Prefix=str(var_prefix))
+        response = s3_client.list_objects_v2(Bucket=c.INPUT_BUCKET, Prefix=str(var_prefix))
         
         if "Contents" not in response:
             continue
@@ -160,7 +129,7 @@ def find_best_file(s3_client, model, scenario, ensemble_member, year, var_candid
         chosen_file = v1_1_files[0] if v1_1_files else matching_files[0]
         
         # Construct and return the full S3 URI
-        return f"s3://{INPUT_BUCKET}/{var_prefix / chosen_file}"
+        return f"s3://{c.INPUT_BUCKET}/{var_prefix / chosen_file}"
     
     return None
     
@@ -177,27 +146,24 @@ def generate_current_year_config(s3_client,
     
     # Get input files for 
     input_uris = []
-    for var_candidates in VAR_LIST:
+    for var_candidates in c.VAR_LIST:
         input_uri = find_best_file(s3_client, model, scenario, ensemble_member, year, var_candidates)
         if input_uri is None:
             print(f"Error: Could not find a valid file for variables: {var_candidates}")
             sys.exit(1)
         input_uris.append(input_uri)
 
-    
-    run_id = uuid.uuid4().int
-
     # Construct output Zarr file names
     current_year_file = f"fwi_day_{model}_{scenario}_{ensemble_member}_gn_{year}.zarr"
     prior_year_file = f"fwi_day_{model}_{scenario}_{ensemble_member}_gn_{year - 1}.zarr"
 
-    # Base S3 path
-    base_s3_path = PurePosixPath(OUTPUT_BUCKET, OUTPUT_PREFIX, model, scenario, ensemble_member)
+    base_s3_path = PurePosixPath(c.OUTPUT_BUCKET, c.OUTPUT_PREFIX, model, scenario, ensemble_member)
 
     # Full output URIs
     current_year_output_uri = f"s3://{base_s3_path / current_year_file}"
     prior_year_output_uri = f"s3://{base_s3_path / prior_year_file}"
     
+    # We check if the prior year dataset exists to get initial conditions
     if s3_uri_exists(s3_client=s3_client, s3_uri=prior_year_output_uri):
         initial_conditions = InitialConditions.from_zarr(prior_year_zarr=prior_year_output_uri)
     else:
@@ -210,14 +176,11 @@ def generate_current_year_config(s3_client,
 
     # Run Configuration
     config = CalcConfig(
-        run_id=run_id,
-        run_type=RUN_TYPE,
-        rechunk_n_workers=N_WORKERS,
-        calc_n_workers=N_WORKERS,
-        threads_per_worker=THREADS,
-        time_chunk=TIME_CHUNK,
-        lat_chunk=LAT_CHUNK,
-        lon_chunk=LON_CHUNK,
+        n_workers=c.N_WORKERS,
+        threads_per_worker=c.THREADS,
+        time_chunk=c.TIME_CHUNK,
+        lat_chunk=c.LAT_CHUNK,
+        lon_chunk=c.LON_CHUNK,
         bbox=bbox,
         initial_conditions=initial_conditions,
         zarr_output_uri=current_year_output_uri,
@@ -238,9 +201,9 @@ def main(model: str,
     s3_client = boto3.client('s3')      
 
     if scenario == "historical":
-        years = VALID_YEARS["historical"]
+        years = c.VALID_YEARS["historical"]
     elif scenario.startswith("ssp"):
-        years = VALID_YEARS["ssp"]
+        years = c.VALID_YEARS["ssp"]
     else:
         years = None
         raise ValueError("Invalid input scenario!")
@@ -261,7 +224,7 @@ def main(model: str,
             continue
         
         # Run calculation
-        calc.main(config)
+        calc.main(s3_client=s3_client, config=config)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run Dask EC2 Test")
