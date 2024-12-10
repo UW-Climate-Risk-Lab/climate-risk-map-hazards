@@ -44,9 +44,9 @@ TEST_S3_PATHS = {
 
 RUN_TYPE = "one_year"
 TIME_CHUNK = -1
-LAT_CHUNK = 30
-LON_CHUNK = 72
-CALC_N_WORKERS = 64
+LAT_CHUNK = 60
+LON_CHUNK = 144
+CALC_N_WORKERS = 32
 THREADS = 4
 
 # US
@@ -214,8 +214,8 @@ def main(ec2_type: str):
     # Load data directly from S3 using fsspec and xarray
     # Disable unnecessary decoding to speed up
     start_time = time.time()
-    fs = fsspec.filesystem("s3", anon=True)
-    flist = [fs.open(path, mode="rb") for path in config.input_uris]
+    fs_r = fsspec.filesystem("s3", anon=True)
+    flist = [fs_r.open(path, mode="rb") for path in config.input_uris]
     ds = xr.open_mfdataset(
         flist, engine="h5netcdf", decode_times=True, combine="by_coords", chunks="auto"
     )
@@ -240,12 +240,7 @@ def main(ec2_type: str):
     write_time = -999
     if ds_fwi is not None and S3 and WRITE:
         try:
-            fs = s3fs.S3FileSystem(anon=False,
-                                    use_ssl=True,
-                                    client_kwargs={
-                                        'aws_access_key_id': None,  # Will force boto to look for credentials
-                                        'aws_secret_access_key': None,
-                                    })
+            fs = s3fs.S3FileSystem(anon=False)
             # Let to_zarr() handle the computation
             ds_fwi.to_zarr(
                 store=s3fs.S3Map(root=config.output_uri, s3=fs),
