@@ -3,18 +3,12 @@ import xarray as xr
 import xclim
 
 import time
-import os
-import shutil
 import s3fs
 import fsspec
-import boto3
-
-from dataclasses import dataclass
 import csv
-
-
 from typing import List
-from pipeline import CalcConfig, InitialConditions
+
+from src.pipeline import CalcConfig
 
 
 def read_csv_from_s3(s3_client, bucket: str, key: str) -> List[List[str]]:
@@ -71,9 +65,12 @@ def calc(ds: xr.Dataset, config: CalcConfig) -> xr.Dataset:
 
 def load(config: CalcConfig) -> xr.Dataset:
     fs = fsspec.filesystem("s3", anon=True)
-    flist = [fs.open(path, mode="rb") for path in config.input_uris]
     ds = xr.open_mfdataset(
-        flist, engine="h5netcdf", decode_times=True, combine="by_coords", chunks="auto"
+        [fs.open(path, mode="rb") for path in config.input_uris],
+        engine="h5netcdf",
+        decode_times=True,
+        combine="by_coords",
+        chunks="auto"
     )
     # Persisting the bounded dataset into cluster memory (if memory allows)
     if config.bbox:
@@ -111,8 +108,6 @@ def main(s3_client, config: CalcConfig):
             ]
         )
 
-    print(f"Running configuration: {config}")
-
     config_start_time = time.time()
 
     # Create a single Dask client to be reused
@@ -145,7 +140,7 @@ def main(s3_client, config: CalcConfig):
             fs = s3fs.S3FileSystem(anon=False)
             # Let to_zarr() handle the computation
             ds_fwi.to_zarr(
-                store=s3fs.S3Map(root=config.output_uri, s3=fs),
+                store=s3fs.S3Map(root=config.zarr_output_uri, s3=fs),
                 mode="w",
                 consolidated=False,
             )
@@ -154,12 +149,14 @@ def main(s3_client, config: CalcConfig):
         except Exception as e:
             write_time = -999
             print(f"Error writing to s3: {str(e)}")
+            raise ValueError
 
     # Close the client
     client.close()
 
     csv_rows.append(
         [
+            config.zarr_output_uri,
             config.n_workers,
             config.threads_per_worker,
             config.lat_chunk,

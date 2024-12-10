@@ -15,14 +15,14 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application code
-COPY calc.py .
-COPY pipeline.py .
+COPY src/ src/
 
 # Expose ports for Dask dashboard (8787 is default)
 EXPOSE 8787
 
 # Set environment variables
 ENV PYTHONUNBUFFERED=1
+ENV PYTHONPATH="/app"
 
 # Set the entrypoint to run the Python script
-ENTRYPOINT ["python", "pipeline.py"]
+ENTRYPOINT ["python", "src/pipeline.py"]

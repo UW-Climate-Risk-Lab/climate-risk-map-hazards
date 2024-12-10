@@ -4,5 +4,5 @@
 
 
 '''bash
-docker run --network host calc --ec2_type c59xlarge --model CESM2 --scenario ssp126 --ensemble_member r4i1p1f1 --year 2060
+docker run --network host pipeline --model MIROC6 --scenario ssp126 --ensemble_member r1i1p1f1 --x_min 10 --y_min 50 --x_max 50 --y_max 300
 '''
