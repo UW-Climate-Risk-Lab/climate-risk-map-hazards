@@ -149,6 +149,8 @@ def calc(ds: xr.Dataset, config: RunConfig) -> xr.Dataset:
     # Do not compute here; let to_zarr handle the compute to minimize extra steps.
     return ds_fwi
 
+def load(config: RunConfig):
+    pass
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Run Dask EC2 Test")
