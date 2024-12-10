@@ -14,12 +14,12 @@ import csv
 
 
 from typing import List
-from pipeline import RunConfig
+from pipeline import CalcConfig, InitialConditions
 
 
 @dataclass
 class Results:
-    config: RunConfig
+    config: CalcConfig
     load_time: float
     calc_time: float  # seconds
     write_time: float  # seconds
@@ -46,7 +46,7 @@ def write_csv_to_s3(s3_client, bucket: str, key: str, rows: List[List[str]]):
         print(f"Error writing CSV to S3: {e}")
 
 
-def calc(ds: xr.Dataset, config: RunConfig) -> xr.Dataset:
+def calc(ds: xr.Dataset, config: CalcConfig) -> xr.Dataset:
     # The client will be created once in main and passed data via persisted ds.
     # Here we just define calculation steps.
     target_chunks = {
@@ -58,18 +58,27 @@ def calc(ds: xr.Dataset, config: RunConfig) -> xr.Dataset:
     # Re-chunk directly as desired
     ds = ds.chunk(target_chunks)
 
-    # Attempt to get tasmax or fallback to tas
-    try:
-        tas = ds.tasmax
-    except AttributeError:
-        tas = ds.tas
+    # Select DataArrays for calculation
+    tas = ds.tasmax
+    pr = ds.pr
+    hurs = ds.hurs
+    sfcWind = ds.sfcWind
+    lat = ds.lat
+
+    # These can be None
+    ffmc0 = config.initial_conditions.ffmc
+    dmc0 = config.initial_conditions.dmc
+    dc0 = config.initial_conditions.dc
 
     out_fwi = xclim.indicators.atmos.cffwis_indices(
         tas=tas,
-        pr=ds.pr,
-        hurs=ds.hurs,
-        sfcWind=ds.sfcWind,
+        pr=pr,
+        hurs=hurs,
+        sfcWind=sfcWind,
         lat=ds.lat,
+        ffmc0=ffmc0,
+        dmc0=dmc0,
+        dc0=dc0,
         season_method=None,
         overwintering=False,
     )
@@ -78,20 +87,20 @@ def calc(ds: xr.Dataset, config: RunConfig) -> xr.Dataset:
     ds_fwi = xr.Dataset({name: da for name, da in zip(names, out_fwi)})
     return ds_fwi
 
-def load(config: RunConfig) -> xr.Dataset:
+def load(config: CalcConfig) -> xr.Dataset:
     fs_r = fsspec.filesystem("s3", anon=True)
     flist = [fs_r.open(path, mode="rb") for path in config.input_uris]
     ds = xr.open_mfdataset(
         flist, engine="h5netcdf", decode_times=True, combine="by_coords", chunks="auto"
     )
-    # Persisting the dataset into cluster memory (if memory allows)
+    # Persisting the bounded dataset into cluster memory (if memory allows)
     ds = ds.sel(lat=slice(config.bbox["ymin"], config.bbox["ymax"]),
                 lon=slice(config.bbox["xmin"], config.bbox["xmax"])).persist()
 
     return ds
 
 
-def main(config: RunConfig):
+def main(config: CalcConfig):
     s3_client = boto3.client("s3")
     bucket = "uw-crl"
     csv_key = "scratch/dask_results.csv"

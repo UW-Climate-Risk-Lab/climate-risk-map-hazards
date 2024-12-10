@@ -15,7 +15,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application code
-COPY run.py .
+COPY calc.py .
 COPY pipeline.py .
 
 # Expose ports for Dask dashboard (8787 is default)
