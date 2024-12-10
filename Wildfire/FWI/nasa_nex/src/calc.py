@@ -1,4 +1,3 @@
-from distributed import Client
 import xarray as xr
 import xclim
 
@@ -33,6 +32,15 @@ def write_csv_to_s3(s3_client, bucket: str, key: str, rows: List[List[str]]):
 
 
 def calc(ds: xr.Dataset, config: CalcConfig) -> xr.Dataset:
+
+    target_chunks = {
+        "time": config.time_chunk,
+        "lat": config.lat_chunk,
+        "lon": config.lon_chunk,
+    }
+
+    # Re-chunk directly as desired
+    ds = ds.chunk(target_chunks)
     
     # Select DataArrays for calculation
     tas = ds.tasmax
@@ -76,15 +84,6 @@ def load(config: CalcConfig) -> xr.Dataset:
     if config.bbox:
         ds = ds.sel(lat=slice(config.bbox.y_min, config.bbox.y_max),
                     lon=slice(config.bbox.x_min, config.bbox.x_max))
-    
-    target_chunks = {
-        "time": config.time_chunk,
-        "lat": config.lat_chunk,
-        "lon": config.lon_chunk,
-    }
-
-    # Re-chunk directly as desired
-    ds = ds.chunk(target_chunks)
 
     return ds.persist()
 
@@ -109,13 +108,6 @@ def main(s3_client, config: CalcConfig):
         )
 
     config_start_time = time.time()
-
-    # Create a single Dask client to be reused
-    client = Client(
-        n_workers=config.n_workers,
-        threads_per_worker=config.threads_per_worker,
-        memory_limit="auto",
-    )
 
     # Load data directly from S3 using fsspec and xarray
     # Disable unnecessary decoding to speed up
@@ -150,9 +142,6 @@ def main(s3_client, config: CalcConfig):
             write_time = -999
             print(f"Error writing to s3: {str(e)}")
             raise ValueError
-
-    # Close the client
-    client.close()
 
     csv_rows.append(
         [

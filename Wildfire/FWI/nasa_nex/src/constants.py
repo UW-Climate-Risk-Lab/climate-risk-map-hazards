@@ -5,10 +5,6 @@ OUTPUT_BUCKET = "uw-crl"
 OUTPUT_PREFIX = "climate-risk-map/backend/climate/scenariomip"
 
 TIME_CHUNK = -1
-LAT_CHUNK = 160
-LON_CHUNK = 160
-N_WORKERS = 16
-THREADS = 4
 
 VAR_LIST = [
         ["tasmax"],

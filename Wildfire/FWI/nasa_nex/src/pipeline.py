@@ -3,10 +3,12 @@ import boto3
 import re
 import argparse
 from dataclasses import dataclass, fields
+import multiprocessing
 
 import xarray as xr
 from urllib.parse import urlparse
 from pathlib import PurePosixPath
+from distributed import Client
 
 import src.constants as c
 import src.calc as calc
@@ -142,6 +144,9 @@ def generate_current_year_config(s3_client,
                                  model: str, 
                                  scenario: str, 
                                  ensemble_member: str,
+                                 lat_chunk: str,
+                                 lon_chunk: str,
+                                 threads: str,
                                  x_min: str,
                                  y_min: str,
                                  x_max: str,
@@ -180,11 +185,11 @@ def generate_current_year_config(s3_client,
 
     # Run Configuration
     config = CalcConfig(
-        n_workers=c.N_WORKERS,
-        threads_per_worker=c.THREADS,
+        n_workers=multiprocessing.cpu_count(),
+        threads_per_worker=int(threads),
         time_chunk=c.TIME_CHUNK,
-        lat_chunk=c.LAT_CHUNK,
-        lon_chunk=c.LON_CHUNK,
+        lat_chunk=int(lat_chunk),
+        lon_chunk=int(lon_chunk),
         bbox=bbox,
         initial_conditions=initial_conditions,
         zarr_output_uri=current_year_output_uri,
@@ -197,12 +202,21 @@ def generate_current_year_config(s3_client,
 def main(model: str,
          scenario: str,
          ensemble_member: str,
+         lat_chunk: str,
+         lon_chunk: str,
+         threads: str,
          x_min: str,
          y_min: str,
          x_max: str,
          y_max: str):
 
-    s3_client = boto3.client('s3')      
+    s3_client = boto3.client('s3')
+    # Create a single Dask client to be reused
+    dask_client = Client(
+        n_workers=multiprocessing.cpu_count(),
+        threads_per_worker=int(threads),
+        memory_limit="auto",
+    )    
 
     if scenario == "historical":
         years = c.VALID_YEARS["historical"]
@@ -218,6 +232,9 @@ def main(model: str,
                                               model=model,
                                               scenario=scenario,
                                               ensemble_member=ensemble_member,
+                                              lat_chunk=lat_chunk,
+                                              lon_chunk=lon_chunk,
+                                              threads=threads,
                                               x_min=x_min,
                                               y_min=y_min,
                                               x_max=x_max,
@@ -231,21 +248,32 @@ def main(model: str,
         # Run calculation
         calc.main(s3_client=s3_client, config=config)
 
+    # Close the client
+    dask_client.close()
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run Dask EC2 Test")
     parser.add_argument("--model", type=str, required=True, help="Climate model")
     parser.add_argument("--scenario", type=str, required=True, help="SSP Scenario or Historical")
     parser.add_argument("--ensemble_member", type=str, required=True, help="Simulation Run e.g 'r4i1p1f1'")
+    parser.add_argument("--lat_chunk", type=str, required=False, help="Size of latitude chunk")
+    parser.add_argument("--lon_chunk", type=str, required=False, help="Size of longitude chunk")
+    parser.add_argument("--threads", type=str, required=False, help="Threads per worker")
     parser.add_argument("--x_min", type=str, required=False, help="For bounding box, minimum Longitude")
     parser.add_argument("--y_min", type=str, required=False, help="For bounding box, minimum Latitude")
     parser.add_argument("--x_max", type=str, required=False, help="For bounding box, maximum Longitude")
     parser.add_argument("--y_max", type=str, required=False, help="For bounding box, maximum Latitude")
+    
+
 
     args = parser.parse_args()
     main(
         model=args.model,
         scenario=args.scenario,
         ensemble_member=args.ensemble_member,
+        lat_chunk=args.lat_chunk,
+        lon_chunk=args.lon_chunk,
+        threads=args.threads,
         x_min=args.x_min,
         x_max=args.x_max,
         y_min=args.y_min,
