@@ -8,68 +8,13 @@ import shutil
 import s3fs
 import fsspec
 import boto3
-import tempfile
-import multiprocessing
 
 from dataclasses import dataclass
 import csv
-import uuid
+
 
 from typing import List
-import argparse
-
-S3 = True
-WRITE = True
-
-TEST_S3_PATHS = {
-    "one_year": {
-        "s3": [
-            "s3://nex-gddp-cmip6/NEX-GDDP-CMIP6/CESM2/ssp126/r4i1p1f1/hurs/hurs_day_CESM2_ssp126_r4i1p1f1_gn_2030_v1.1.nc",
-            "s3://nex-gddp-cmip6/NEX-GDDP-CMIP6/CESM2/ssp126/r4i1p1f1/pr/pr_day_CESM2_ssp126_r4i1p1f1_gn_2030_v1.1.nc",
-            "s3://nex-gddp-cmip6/NEX-GDDP-CMIP6/CESM2/ssp126/r4i1p1f1/sfcWind/sfcWind_day_CESM2_ssp126_r4i1p1f1_gn_2030.nc",
-            "s3://nex-gddp-cmip6/NEX-GDDP-CMIP6/CESM2/ssp126/r4i1p1f1/tas/tas_day_CESM2_ssp126_r4i1p1f1_gn_2030.nc",
-        ],
-        "local": [],
-    },
-    "hundred_year": {
-        "s3": [
-            "s3://uw-climaterisklab/scratch/MIROC6_historical_sfcWind_concatenated.nc",
-            "s3://uw-climaterisklab/scratch/MIROC6_historical_hurs_concatenated.nc",
-            "s3://uw-climaterisklab/scratch/MIROC6_historical_tasmax_concatenated.nc",
-            "s3://uw-climaterisklab/scratch/MIROC6_historical_pr_concatenated.nc",
-        ],
-        "local": [],
-    },
-}
-
-RUN_TYPE = "one_year"
-TIME_CHUNK = -1
-LAT_CHUNK = 60
-LON_CHUNK = 144
-CALC_N_WORKERS = 32
-THREADS = 4
-
-# US
-LAT_MIN = 10
-LAT_MAX = 50
-LON_MIN = 230
-LON_MAX = 300
-
-
-@dataclass
-class RunConfig:
-    run_id: int
-    run_type: str
-    rechunk_n_workers: int
-    calc_n_workers: int
-    threads_per_worker: int
-    time_chunk: int
-    lat_chunk: int
-    lon_chunk: int
-    zarr_store: str
-    input_uris: list
-    output_uri: str
-    s3: bool
+from pipeline import RunConfig
 
 
 @dataclass
@@ -78,21 +23,6 @@ class Results:
     load_time: float
     calc_time: float  # seconds
     write_time: float  # seconds
-
-
-def upload_directory_to_s3(local_path, bucket, prefix):
-    s3_client = boto3.client("s3")
-
-    # Walk through all files in directory
-    for root, dirs, files in os.walk(local_path):
-        for filename in files:
-            local_file = os.path.join(root, filename)
-            # Construct S3 key maintaining directory structure
-            relative_path = os.path.relpath(local_file, local_path)
-            s3_key = os.path.join(prefix, relative_path)
-
-            # Upload file
-            s3_client.upload_file(local_file, bucket, s3_key)
 
 
 def read_csv_from_s3(s3_client, bucket: str, key: str) -> List[List[str]]:
@@ -146,40 +76,22 @@ def calc(ds: xr.Dataset, config: RunConfig) -> xr.Dataset:
 
     names = ["dc", "dmc", "ffmc", "isi", "bui", "fwi"]
     ds_fwi = xr.Dataset({name: da for name, da in zip(names, out_fwi)})
-    # Do not compute here; let to_zarr handle the compute to minimize extra steps.
     return ds_fwi
 
-def load(config: RunConfig):
-    pass
-
-def parse_args():
-    parser = argparse.ArgumentParser(description="Run Dask EC2 Test")
-    parser.add_argument("--ec2_type", type=str, required=True, help="EC2 instance type")
-    return parser.parse_args()
-
-
-def main(ec2_type: str):
-    run_id = uuid.uuid4().int
-    if S3:
-        urls = TEST_S3_PATHS[RUN_TYPE]["s3"]
-    else:
-        urls = TEST_S3_PATHS[RUN_TYPE]["local"]
-
-    config = RunConfig(
-        run_id=run_id,
-        run_type=RUN_TYPE,
-        calc_n_workers=CALC_N_WORKERS,
-        rechunk_n_workers=CALC_N_WORKERS,
-        threads_per_worker=THREADS,
-        time_chunk=TIME_CHUNK,
-        lat_chunk=LAT_CHUNK,
-        lon_chunk=LON_CHUNK,
-        zarr_store=f"r{run_id}.zarr",
-        s3=S3,
-        input_uris=urls,
-        output_uri=f"s3://uw-crl/scratch/{run_id}.zarr",
+def load(config: RunConfig) -> xr.Dataset:
+    fs_r = fsspec.filesystem("s3", anon=True)
+    flist = [fs_r.open(path, mode="rb") for path in config.input_uris]
+    ds = xr.open_mfdataset(
+        flist, engine="h5netcdf", decode_times=True, combine="by_coords", chunks="auto"
     )
+    # Persisting the dataset into cluster memory (if memory allows)
+    ds = ds.sel(lat=slice(config.bbox["ymin"], config.bbox["ymax"]),
+                lon=slice(config.bbox["xmin"], config.bbox["xmax"])).persist()
 
+    return ds
+
+
+def main(config: RunConfig):
     s3_client = boto3.client("s3")
     bucket = "uw-crl"
     csv_key = "scratch/dask_results.csv"
@@ -190,7 +102,6 @@ def main(ec2_type: str):
             [
                 "run_id",
                 "run_type",
-                "rechunk_n_workers",
                 "calc_n_workers",
                 "threads_per_worker",
                 "ec2_type",
@@ -216,15 +127,7 @@ def main(ec2_type: str):
     # Load data directly from S3 using fsspec and xarray
     # Disable unnecessary decoding to speed up
     start_time = time.time()
-    fs_r = fsspec.filesystem("s3", anon=True)
-    flist = [fs_r.open(path, mode="rb") for path in config.input_uris]
-    ds = xr.open_mfdataset(
-        flist, engine="h5netcdf", decode_times=True, combine="by_coords", chunks="auto"
-    )
-
-    # Persisting the dataset into cluster memory (if memory allows)
-    ds = ds.sel(lat=slice(LAT_MIN, LAT_MAX), lon=slice(LON_MIN, LON_MAX)).persist()
-
+    ds = load(config)
     load_elapsed_time = time.time() - start_time
 
     # Perform calculation (no additional rechunk step separately, done inside calc)
@@ -240,7 +143,7 @@ def main(ec2_type: str):
     # Writing results to S3 as Zarr
     start_time = time.time()
     write_time = -999
-    if ds_fwi is not None and S3 and WRITE:
+    if ds_fwi:
         try:
             fs = s3fs.S3FileSystem(anon=False)
             # Let to_zarr() handle the computation
@@ -252,7 +155,6 @@ def main(ec2_type: str):
             write_time = time.time() - start_time
 
         except Exception as e:
-            write_time = -999
             print(f"Error writing to s3: {str(e)}")
 
     # Close the client
@@ -269,10 +171,8 @@ def main(ec2_type: str):
         [
             result.config.run_id,
             result.config.run_type,
-            result.config.rechunk_n_workers,
             result.config.calc_n_workers,
             result.config.threads_per_worker,
-            ec2_type,
             result.config.lat_chunk,
             result.config.lon_chunk,
             result.load_time,
@@ -291,8 +191,3 @@ def main(ec2_type: str):
     print(
         f"Configuration {config.run_id} completed in {config_elapsed_time:.2f} seconds."
     )
-
-
-if __name__ == "__main__":
-    args = parse_args()
-    main(ec2_type=args.ec2_type)
