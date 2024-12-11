@@ -1,0 +1,10 @@
+xclim
+xarray
+dask
+zarr
+h5netcdf
+distributed
+s3fs
+fsspec
+boto3
+bokeh
