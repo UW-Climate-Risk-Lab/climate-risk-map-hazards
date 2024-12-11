@@ -10,7 +10,7 @@ from urllib.parse import urlparse
 from pathlib import PurePosixPath
 from distributed import Client
 
-import src.constants as c
+import src.constants as constants
 import src.calc as calc
 
 @dataclass
@@ -104,10 +104,10 @@ def find_best_file(s3_client, model, scenario, ensemble_member, year, var_candid
     """
     for variable in var_candidates:
         # Construct the S3 prefix path
-        var_prefix = PurePosixPath(c.INPUT_PREFIX, model, scenario, ensemble_member, variable)
+        var_prefix = PurePosixPath(constants.INPUT_PREFIX, model, scenario, ensemble_member, variable)
         
         # List objects in the S3 bucket under the given prefix
-        response = s3_client.list_objects_v2(Bucket=c.INPUT_BUCKET, Prefix=str(var_prefix))
+        response = s3_client.list_objects_v2(Bucket=constants.INPUT_BUCKET, Prefix=str(var_prefix))
         
         if "Contents" not in response:
             continue
@@ -134,7 +134,7 @@ def find_best_file(s3_client, model, scenario, ensemble_member, year, var_candid
         chosen_file = v1_1_files[0] if v1_1_files else matching_files[0]
         
         # Construct and return the full S3 URI
-        return f"s3://{c.INPUT_BUCKET}/{var_prefix / chosen_file}"
+        return f"s3://{constants.INPUT_BUCKET}/{var_prefix / chosen_file}"
     
     return None
     
@@ -154,7 +154,7 @@ def generate_current_year_config(s3_client,
     
     # Get input files for 
     input_uris = []
-    for var_candidates in c.VAR_LIST:
+    for var_candidates in constants.VAR_LIST:
         input_uri = find_best_file(s3_client, model, scenario, ensemble_member, year, var_candidates)
         if input_uri is None:
             print(f"Error: Could not find a valid file for variables: {var_candidates}")
@@ -165,7 +165,12 @@ def generate_current_year_config(s3_client,
     current_year_file = f"fwi_day_{model}_{scenario}_{ensemble_member}_gn_{year}.zarr"
     prior_year_file = f"fwi_day_{model}_{scenario}_{ensemble_member}_gn_{year - 1}.zarr"
 
-    base_s3_path = PurePosixPath(c.OUTPUT_BUCKET, c.OUTPUT_PREFIX, c.INPUT_PREFIX, model, scenario, ensemble_member)
+    base_s3_path = PurePosixPath(constants.OUTPUT_BUCKET,
+                                 constants.OUTPUT_PREFIX,
+                                 constants.INPUT_PREFIX,
+                                 model,
+                                 scenario,
+                                 ensemble_member)
 
     # Full output URIs
     current_year_output_uri = f"s3://{base_s3_path / current_year_file}"
@@ -187,7 +192,7 @@ def generate_current_year_config(s3_client,
     config = CalcConfig(
         n_workers=multiprocessing.cpu_count(),
         threads_per_worker=int(threads),
-        time_chunk=c.TIME_CHUNK,
+        time_chunk=constants.TIME_CHUNK,
         lat_chunk=int(lat_chunk),
         lon_chunk=int(lon_chunk),
         bbox=bbox,
@@ -219,9 +224,9 @@ def main(model: str,
     )    
 
     if scenario == "historical":
-        years = c.VALID_YEARS["historical"]
+        years = constants.VALID_YEARS["historical"]
     elif scenario.startswith("ssp"):
-        years = c.VALID_YEARS["ssp"]
+        years = constants.VALID_YEARS["ssp"]
     else:
         years = None
         raise ValueError("Invalid input scenario!")
