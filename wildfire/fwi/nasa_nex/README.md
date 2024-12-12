@@ -61,7 +61,7 @@ docker run --rm climate-pipeline
     --lat_chunk 30 
     --lon_chunk 72 
     --threads 8 
-    --x_min 10 --y_min 50 --x_max 50 --y_max 300
+    --x_min 230 --y_min 10 --x_max 300 --y_max 50
 ```
 
 **Arguments:**
