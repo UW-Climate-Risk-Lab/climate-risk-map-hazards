@@ -115,7 +115,7 @@ def find_best_file(s3_client, model, scenario, ensemble_member, year, var_candid
         # Regex to match the required file pattern
         pattern = (
             rf"^{variable}_day_{re.escape(model)}_{re.escape(scenario)}_"
-            rf"{re.escape(ensemble_member)}_gn_{year}(_v\d+\.\d+)?\.nc$"
+            rf"{re.escape(ensemble_member)}_g[^_]+_{year}(_v\d+\.\d+)?\.nc$"
         )
         file_regex = re.compile(pattern)
         
@@ -131,6 +131,7 @@ def find_best_file(s3_client, model, scenario, ensemble_member, year, var_candid
         
         # Prioritize files with v1.1 if available
         v1_1_files = [f for f in matching_files if "_v1.1.nc" in f]
+
         chosen_file = v1_1_files[0] if v1_1_files else matching_files[0]
         
         # Construct and return the full S3 URI

@@ -52,7 +52,7 @@ docker build -t climate-pipeline .
 ### Running the Pipeline
 
 Run the pipeline container with the required arguments:
-
+(This example uses bounds for North America)
 ```bash
 docker run --rm climate-pipeline 
     --model MIROC6 
