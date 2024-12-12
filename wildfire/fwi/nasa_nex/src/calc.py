@@ -10,27 +10,6 @@ from typing import List
 from src.pipeline import CalcConfig
 
 
-def read_csv_from_s3(s3_client, bucket: str, key: str) -> List[List[str]]:
-    try:
-        obj = s3_client.get_object(Bucket=bucket, Key=key)
-        csv_content = obj["Body"].read().decode("utf-8").splitlines()
-        reader = csv.reader(csv_content)
-        return list(reader)
-    except s3_client.exceptions.NoSuchKey:
-        return []
-    except Exception as e:
-        print(f"Error reading CSV from S3: {e}")
-        return []
-
-
-def write_csv_to_s3(s3_client, bucket: str, key: str, rows: List[List[str]]):
-    try:
-        csv_content = "\n".join([",".join(map(str, row)) for row in rows])
-        s3_client.put_object(Bucket=bucket, Key=key, Body=csv_content)
-    except Exception as e:
-        print(f"Error writing CSV to S3: {e}")
-
-
 def calc(ds: xr.Dataset, config: CalcConfig) -> xr.Dataset:
 
     target_chunks = {
@@ -88,24 +67,7 @@ def load(config: CalcConfig) -> xr.Dataset:
     return ds.persist()
 
 
-def main(s3_client, config: CalcConfig):
-    bucket = "uw-crl"
-    csv_key = "scratch/dask_results.csv"
-
-    csv_rows = read_csv_from_s3(s3_client, bucket, csv_key)
-    if not csv_rows:
-        csv_rows.append(
-            [   
-                "output",
-                "n_workers",
-                "threads_per_worker",
-                "lat_chunk",
-                "lon_chunk",
-                "load_time",
-                "calc_time",
-                "write_time",
-            ]
-        )
+def main(config: CalcConfig):
 
     config_start_time = time.time()
 
@@ -142,20 +104,6 @@ def main(s3_client, config: CalcConfig):
             write_time = -999
             print(f"Error writing to s3: {str(e)}")
             raise ValueError
-
-    csv_rows.append(
-        [
-            config.zarr_output_uri,
-            config.n_workers,
-            config.threads_per_worker,
-            config.lat_chunk,
-            config.lon_chunk,
-            load_time,
-            calc_time,
-            write_time,
-        ]
-    )
-    write_csv_to_s3(s3_client, bucket, csv_key, csv_rows)
 
     config_elapsed_time = time.time() - config_start_time
     print(

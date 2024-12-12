@@ -252,7 +252,7 @@ def main(model: str,
             continue
         
         # Run calculation
-        calc.main(s3_client=s3_client, config=config)
+        calc.main(config=config)
 
     # Close the client
     dask_client.close()
