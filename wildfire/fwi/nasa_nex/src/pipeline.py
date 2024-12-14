@@ -1,4 +1,6 @@
 import sys
+import gc
+import psutil
 import boto3
 import re
 import argparse
@@ -66,6 +68,10 @@ class CalcConfig:
     zarr_output_uri: str
     input_uris: list
 
+def log_memory_usage():
+    """Log current memory usage"""
+    process = psutil.Process()
+    print(f"Memory usage: {process.memory_info().rss / 1024 / 1024:.2f} MB")
 
 def s3_uri_exists(s3_client, s3_uri: str, zarr_store: bool = False) -> bool:
     """
@@ -216,13 +222,6 @@ def main(model: str,
          x_max: str,
          y_max: str):
 
-    s3_client = boto3.client('s3')
-    # Create a single Dask client to be reused
-    dask_client = Client(
-        n_workers=multiprocessing.cpu_count(),
-        threads_per_worker=int(threads),
-        memory_limit="auto",
-    )    
 
     if scenario == "historical":
         years = constants.VALID_YEARS["historical"]
@@ -232,27 +231,47 @@ def main(model: str,
         years = None
         raise ValueError("Invalid input scenario!")
     
+    dask_client = Client(
+            n_workers=multiprocessing.cpu_count(),
+            threads_per_worker=int(threads),
+            memory_limit="auto",
+            )
+    s3_client = boto3.client('s3')
     for year in years:
-        config = generate_current_year_config(s3_client=s3_client,
-                                              year=year,
-                                              model=model,
-                                              scenario=scenario,
-                                              ensemble_member=ensemble_member,
-                                              lat_chunk=lat_chunk,
-                                              lon_chunk=lon_chunk,
-                                              threads=threads,
-                                              x_min=x_min,
-                                              y_min=y_min,
-                                              x_max=x_max,
-                                              y_max=y_max)
+        try:
+            log_memory_usage()
+            print(f"Processing year {year}")
+            config = None
+            config = generate_current_year_config(s3_client=s3_client,
+                                                year=year,
+                                                model=model,
+                                                scenario=scenario,
+                                                ensemble_member=ensemble_member,
+                                                lat_chunk=lat_chunk,
+                                                lon_chunk=lon_chunk,
+                                                threads=threads,
+                                                x_min=x_min,
+                                                y_min=y_min,
+                                                x_max=x_max,
+                                                y_max=y_max)
+            
+            if s3_uri_exists(s3_client=s3_client, s3_uri=config.zarr_output_uri, zarr_store=True):
+                print(f"{config.zarr_output_uri} already exists, skipping to next year!")
+                continue
+            
+            # Run calculation
+            calc.main(config=config)
         
-        if s3_uri_exists(s3_client=s3_client, s3_uri=config.zarr_output_uri, zarr_store=True):
-            # If the year has already been calculated and stored, we skip to the next year
-            print(f"{config.zarr_output_uri} already exists, skipping to next year!")
-            continue
-        
-        # Run calculation
-        calc.main(config=config)
+        except Exception as e:
+            print(f"{str(e)}")
+
+        finally:
+            # Clean up after each year
+            print("Cleaning up memory...")
+            if config:
+                del config
+            gc.collect()  # Force garbage collection
+            log_memory_usage()
 
     # Close the client
     dask_client.close()

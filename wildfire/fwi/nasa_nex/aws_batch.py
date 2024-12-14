@@ -16,6 +16,13 @@ Y_MIN = os.getenv("Y_MIN")
 X_MAX = os.getenv("X_MAX")
 Y_MAX = os.getenv("Y_MAX")
 
+if os.getenv("TEST") == "True":
+    TEST = True
+elif os.getenv("TEST") == "False":
+    TEST = False
+else:
+    raise ValueError("TEST env variable must be 'True' or 'False'")
+
 MODELS = [
     {
         "model": "ACCESS-CM2",
@@ -174,33 +181,55 @@ MODELS = [
     },
 ]
 
+
 def validate_env_vars():
     """Validate required environment variables."""
     required_vars = [
-        "AWS_REGION", "JOB_QUEUE", "JOB_DEFINITION", 
-        "LAT_CHUNK", "LON_CHUNK", "THREADS",
-        "X_MIN", "Y_MIN", "X_MAX", "Y_MAX"
+        "TEST",
+        "AWS_REGION",
+        "JOB_QUEUE",
+        "JOB_DEFINITION",
+        "LAT_CHUNK",
+        "LON_CHUNK",
+        "THREADS",
+        "X_MIN",
+        "Y_MIN",
+        "X_MAX",
+        "Y_MAX",
     ]
-    
+
     missing = [var for var in required_vars if not os.getenv(var)]
     if missing:
-        raise ValueError(f"Missing required environment variables: {', '.join(missing)}")
+        raise ValueError(
+            f"Missing required environment variables: {', '.join(missing)}"
+        )
+
 
 def submit_batch_job(model, scenario, ensemble_member):
     """Submits a single job to AWS Batch with specified parameters."""
     try:
         job_name = f"pipeline-{model}-{scenario}-{ensemble_member}"
         command = [
-            "--model", model,
-            "--scenario", scenario,
-            "--ensemble_member", ensemble_member,
-            "--lat_chunk", str(LAT_CHUNK),
-            "--lon_chunk", str(LON_CHUNK),
-            "--threads", str(THREADS),
-            "--x_min", str(X_MIN),
-            "--y_min", str(Y_MIN),
-            "--x_max", str(X_MAX),
-            "--y_max", str(Y_MAX),
+            "--model",
+            model,
+            "--scenario",
+            scenario,
+            "--ensemble_member",
+            ensemble_member,
+            "--lat_chunk",
+            str(LAT_CHUNK),
+            "--lon_chunk",
+            str(LON_CHUNK),
+            "--threads",
+            str(THREADS),
+            "--x_min",
+            str(X_MIN),
+            "--y_min",
+            str(Y_MIN),
+            "--x_max",
+            str(X_MAX),
+            "--y_max",
+            str(Y_MAX),
         ]
 
         response = BATCH_CLIENT.submit_job(
@@ -208,7 +237,7 @@ def submit_batch_job(model, scenario, ensemble_member):
             jobQueue=JOB_QUEUE,
             jobDefinition=JOB_DEFINITION,
             containerOverrides={
-                "command": ["python", "src/pipeline.py"] + command,
+                "command": command,
                 "environment": [
                     {"name": "AWS_REGION", "value": AWS_REGION},
                 ],
@@ -220,6 +249,7 @@ def submit_batch_job(model, scenario, ensemble_member):
         print(f"Failed to submit job {job_name}: {str(e)}")
         return None
 
+
 def monitor_jobs(job_ids):
     """Monitor job statuses with proper error handling."""
     while job_ids:
@@ -228,43 +258,47 @@ def monitor_jobs(job_ids):
             # Process jobs in batches of 100 (AWS Batch API limit)
             batch = job_ids[:100]
             job_statuses = BATCH_CLIENT.describe_jobs(jobs=batch)
-            
+
             for job in job_statuses["jobs"]:
                 if job["status"] in ["SUCCEEDED", "FAILED"]:
                     job_ids.remove(job["jobId"])
                     print(f"Job {job['jobId']} completed with status: {job['status']}")
-                
+
             print(f"Remaining jobs: {len(job_ids)}")
         except ClientError as e:
             print(f"Error checking job status: {str(e)}")
             time.sleep(60)  # Back off on API errors
 
+
 def main():
     try:
         validate_env_vars()
-        
+
         # Initialize AWS client
         global BATCH_CLIENT
         BATCH_CLIENT = boto3.client("batch", region_name=AWS_REGION)
-        
+
         jobs = []
         job_ids = []
 
         # Build all possible jobs
         for model in MODELS:
             for scenario in model["scenario"]:
-                jobs.append({
-                    "model": model["model"],
-                    "scenario": scenario,
-                    "ensemble_member": model["ensemble_member"],
-                })
+                jobs.append(
+                    {
+                        "model": model["model"],
+                        "scenario": scenario,
+                        "ensemble_member": model["ensemble_member"],
+                    }
+                )
+
+        if TEST:
+            jobs = jobs[:2]
 
         # Submit all jobs
         for job in jobs:
             job_id = submit_batch_job(
-                job["model"], 
-                job["scenario"], 
-                job["ensemble_member"]
+                job["model"], job["scenario"], job["ensemble_member"]
             )
             if job_id:
                 job_ids.append(job_id)
@@ -274,10 +308,11 @@ def main():
 
         if job_ids:
             monitor_jobs(job_ids)
-        
+
     except Exception as e:
         print(f"Fatal error: {str(e)}")
         sys.exit(1)
+
 
 if __name__ == "__main__":
     main()

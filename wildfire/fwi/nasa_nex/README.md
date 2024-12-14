@@ -44,7 +44,7 @@ Since each model run is independent, containers could be run in parrallel to pro
 Build the Docker image:
 
 ```bash
-docker build -t climate-pipeline .
+docker build --platform linux/amd64 -t wildfire/fwi/nasa_nex .
 ```
 
 ---
@@ -54,7 +54,7 @@ docker build -t climate-pipeline .
 Run the pipeline container with the required arguments:
 (This example uses bounds for North America)
 ```bash
-docker run --rm climate-pipeline 
+docker run --rm wildfire/fwi/nasa_nex 
     --model MIROC6 
     --scenario ssp126 
     --ensemble_member r1i1p1f1 

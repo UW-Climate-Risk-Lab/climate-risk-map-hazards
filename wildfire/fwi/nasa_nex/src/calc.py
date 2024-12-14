@@ -71,39 +71,31 @@ def main(config: CalcConfig):
 
     config_start_time = time.time()
 
-    # Load data directly from S3 using fsspec and xarray
-    # Disable unnecessary decoding to speed up
-    start_time = time.time()
     ds = load(config)
-    load_time = time.time() - start_time
 
     # Perform calculation (no additional rechunk step separately, done inside calc)
-    try:
-        start_time = time.time()
-        ds_fwi = calc(ds, config)
-        calc_time = time.time() - start_time
-    except Exception as e:
-        ds_fwi = None
-        calc_time = -999
-        print(f"{config.zarr_output_uri} calc failed: {e}")
+    ds_fwi = calc(ds, config)
 
     # Writing results to S3 as Zarr
-    if ds_fwi:
-        try:
-            start_time = time.time()
-            fs = s3fs.S3FileSystem(anon=False)
-            # Let to_zarr() handle the computation
-            ds_fwi.to_zarr(
-                store=s3fs.S3Map(root=config.zarr_output_uri, s3=fs),
-                mode="w",
-                consolidated=False,
-            )
-            write_time = time.time() - start_time
+    try:
+        fs = s3fs.S3FileSystem(anon=False)
+        # Let to_zarr() handle the computation
+        ds_fwi.to_zarr(
+            store=s3fs.S3Map(root=config.zarr_output_uri, s3=fs),
+            mode="w",
+            consolidated=False,
+        )
 
-        except Exception as e:
-            write_time = -999
-            print(f"Error writing to s3: {str(e)}")
-            raise ValueError
+    except Exception as e:
+        print(f"Error writing to s3: {str(e)}")
+        raise ValueError
+    
+    try:
+        ds_fwi.close()
+        ds.close()
+        del ds_fwi, ds
+    except Exception as e:
+        print(f"Trouble cleaning up ds: {str(e)}")
 
     config_elapsed_time = time.time() - config_start_time
     print(
