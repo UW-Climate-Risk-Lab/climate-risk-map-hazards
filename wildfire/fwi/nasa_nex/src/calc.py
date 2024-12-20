@@ -4,11 +4,16 @@ import xclim
 import time
 import s3fs
 import fsspec
-import csv
-from typing import List
 
 from src.pipeline import CalcConfig
 
+def clean_metadata(ds: xr.Dataset) -> xr.Dataset:
+    """Remove or clean metadata fields prone to duplication."""
+    for var in ds.data_vars:
+        # Clear history and cell_methods to prevent duplication
+        ds[var].attrs.pop("history", None)
+        ds[var].attrs.pop("cell_methods", None)
+    return ds
 
 def calc(ds: xr.Dataset, config: CalcConfig) -> xr.Dataset:
 
@@ -64,7 +69,7 @@ def load(config: CalcConfig) -> xr.Dataset:
         ds = ds.sel(lat=slice(config.bbox.y_min, config.bbox.y_max),
                     lon=slice(config.bbox.x_min, config.bbox.x_max))
 
-    return ds.persist()
+    return ds
 
 
 def main(config: CalcConfig):
@@ -76,6 +81,8 @@ def main(config: CalcConfig):
     # Perform calculation (no additional rechunk step separately, done inside calc)
     ds_fwi = calc(ds, config)
 
+    ds_fwi = clean_metadata(ds_fwi)
+
     # Writing results to S3 as Zarr
     try:
         fs = s3fs.S3FileSystem(anon=False)
@@ -83,7 +90,7 @@ def main(config: CalcConfig):
         ds_fwi.to_zarr(
             store=s3fs.S3Map(root=config.zarr_output_uri, s3=fs),
             mode="w",
-            consolidated=False,
+            consolidated=True,
         )
 
     except Exception as e:

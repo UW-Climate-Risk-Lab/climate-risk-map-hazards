@@ -31,30 +31,14 @@ class InitialConditions:
 
     @classmethod
     def from_zarr(cls, prior_year_zarr: str) -> "InitialConditions":
-        """
-        Extracts the last timestep (time=-1) of the FFMC, DMC, and DC variables 
-        from a prior year's Zarr dataset and creates an InitialConditions instance.
+        ds = xr.open_zarr(store=prior_year_zarr, decode_times=True, consolidated=False)
+        # Load the data arrays from ds so they no longer reference ds
+        ffmc = ds.ffmc.isel(time=-1).load() if 'ffmc' in ds else None
+        dmc = ds.dmc.isel(time=-1).load() if 'dmc' in ds else None
+        dc = ds.dc.isel(time=-1).load() if 'dc' in ds else None
+        ds.close()
 
-        Args:
-            prior_year_zarr (str): Path to the Zarr store for the prior year.
-
-        Returns:
-            InitialConditions: An instance of InitialConditions with values at the last time step.
-        """
-        ds = xr.open_zarr(store=prior_year_zarr, decode_times=True, consolidated=False)  # Open the Zarr dataset
-
-        # Initialize an empty instance of InitialConditions
-        results = cls()
-        
-        # Dynamically set attributes based on dataclass fields
-        for field in fields(cls):
-            if field.name in ds:
-                setattr(results, field.name, ds[field.name].isel(time=-1))
-            else:
-                setattr(results, field.name, None)
-                print(f"Warning: Initial condition variable '{field.name}' not found in the dataset.")
-
-        return results
+        return cls(ffmc=ffmc, dmc=dmc, dc=dc)
 
 @dataclass
 class CalcConfig:
@@ -72,6 +56,7 @@ def log_memory_usage():
     """Log current memory usage"""
     process = psutil.Process()
     print(f"Memory usage: {process.memory_info().rss / 1024 / 1024:.2f} MB")
+
 
 def s3_uri_exists(s3_client, s3_uri: str, zarr_store: bool = False) -> bool:
     """
@@ -217,6 +202,7 @@ def main(model: str,
          lat_chunk: str,
          lon_chunk: str,
          threads: str,
+         memory_available: str,
          x_min: str,
          y_min: str,
          x_max: str,
@@ -231,10 +217,13 @@ def main(model: str,
         years = None
         raise ValueError("Invalid input scenario!")
     
+    n_workers = multiprocessing.cpu_count()
+    memory_limit = int(int(memory_available) / n_workers)
+    
     dask_client = Client(
             n_workers=multiprocessing.cpu_count(),
             threads_per_worker=int(threads),
-            memory_limit="auto",
+            memory_limit=f"{memory_limit}GB",
             )
     s3_client = boto3.client('s3')
     for year in years:
@@ -284,6 +273,7 @@ if __name__ == "__main__":
     parser.add_argument("--lat_chunk", type=str, required=False, help="Size of latitude chunk")
     parser.add_argument("--lon_chunk", type=str, required=False, help="Size of longitude chunk")
     parser.add_argument("--threads", type=str, required=False, help="Threads per worker")
+    parser.add_argument("--memory_available", type=str, required=False, help="Total GB RAM available to the container")
     parser.add_argument("--x_min", type=str, required=False, help="For bounding box, minimum Longitude")
     parser.add_argument("--y_min", type=str, required=False, help="For bounding box, minimum Latitude")
     parser.add_argument("--x_max", type=str, required=False, help="For bounding box, maximum Longitude")
@@ -299,6 +289,7 @@ if __name__ == "__main__":
         lat_chunk=args.lat_chunk,
         lon_chunk=args.lon_chunk,
         threads=args.threads,
+        memory_available=args.memory_available,  # Added missing comma
         x_min=args.x_min,
         x_max=args.x_max,
         y_min=args.y_min,

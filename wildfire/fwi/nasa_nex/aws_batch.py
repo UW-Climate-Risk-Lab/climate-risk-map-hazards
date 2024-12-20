@@ -11,6 +11,7 @@ JOB_DEFINITION = os.getenv("JOB_DEFINITION")
 LAT_CHUNK = os.getenv("LAT_CHUNK")
 LON_CHUNK = os.getenv("LON_CHUNK")
 THREADS = os.getenv("THREADS")
+MEMORY_AVAILABLE = os.getenv("MEMORY_AVAILABLE")
 X_MIN = os.getenv("X_MIN")
 Y_MIN = os.getenv("Y_MIN")
 X_MAX = os.getenv("X_MAX")
@@ -192,6 +193,7 @@ def validate_env_vars():
         "LAT_CHUNK",
         "LON_CHUNK",
         "THREADS",
+        "MEMORY_AVAILABLE",
         "X_MIN",
         "Y_MIN",
         "X_MAX",
@@ -222,6 +224,8 @@ def submit_batch_job(model, scenario, ensemble_member):
             str(LON_CHUNK),
             "--threads",
             str(THREADS),
+            "--memory_available",
+            str(MEMORY_AVAILABLE),
             "--x_min",
             str(X_MIN),
             "--y_min",
@@ -293,7 +297,7 @@ def main():
                 )
 
         if TEST:
-            jobs = jobs[:2]
+            jobs = jobs[1:2]
 
         # Submit all jobs
         for job in jobs:
